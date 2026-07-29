@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 430" width="960" height="430" role="img" aria-label="Bourse request path from TCP packet to reply">
+  <style>
+    :root { color-scheme: light dark; }
+    .bg    { fill: #ffffff; }
+    .title { fill: #111827; font: 700 19px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .sub   { fill: #6b7280; font: 400 13px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .step  { fill: #111827; font: 600 13px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .note  { fill: #6b7280; font: 400 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .num   { fill: #ffffff; font: 700 12px ui-sans-serif, sans-serif; }
+    .box   { fill: #f9fafb; stroke: #d1d5db; stroke-width: 1.5; }
+    .hot   { fill: #eff6ff; stroke: #3b82f6; stroke-width: 1.5; }
+    .dot   { fill: #3b82f6; }
+    .arrow { stroke: #9ca3af; stroke-width: 1.8; fill: none; }
+    .back  { stroke: #16a34a; stroke-width: 1.8; fill: none; stroke-dasharray: 5 4; }
+    .backlbl { fill: #16a34a; font: 600 11px ui-sans-serif, sans-serif; }
+
+    @media (prefers-color-scheme: dark) {
+      .bg    { fill: #0d1117; }
+      .title { fill: #e6edf3; }
+      .sub   { fill: #8b949e; }
+      .step  { fill: #e6edf3; }
+      .note  { fill: #8b949e; }
+      .box   { fill: #161b22; stroke: #30363d; }
+      .hot   { fill: #0d1f36; stroke: #388bfd; }
+      .dot   { fill: #388bfd; }
+      .arrow { stroke: #6e7681; }
+      .back  { stroke: #2ea043; }
+      .backlbl { fill: #2ea043; }
+      .num   { fill: #0d1117; }
+    }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="960" height="430"/>
+
+  <text class="title" x="28" y="36">Request path — `SET user:1 ayush`</text>
+  <text class="sub"   x="28" y="58">Blue boxes are the per-request hot path. Nothing on it allocates for the key, and nothing on it takes a global lock.</text>
+
+  <!-- row 1 -->
+  <rect class="box" x="28"  y="86" width="180" height="76" rx="8"/>
+  <circle class="dot" cx="46" cy="104" r="10"/><text class="num" x="42" y="108">1</text>
+  <text class="step" x="64"  y="108">TCP packet</text>
+  <text class="note" x="44"  y="132">epoll_wait returns a</text>
+  <text class="note" x="44"  y="148">readable token</text>
+
+  <path class="arrow" d="M208 124 L246 124" marker-end="url(#h)"/>
+
+  <rect class="hot" x="246" y="86" width="200" height="76" rx="8"/>
+  <circle class="dot" cx="264" cy="104" r="10"/><text class="num" x="260" y="108">2</text>
+  <text class="step" x="282" y="108">Connection::handleRead</text>
+  <text class="note" x="262" y="132">one recv() into ByteBuffer;</text>
+  <text class="note" x="262" y="148">compacts, rarely reallocates</text>
+
+  <path class="arrow" d="M446 124 L484 124" marker-end="url(#h)"/>
+
+  <rect class="hot" x="484" y="86" width="200" height="76" rx="8"/>
+  <circle class="dot" cx="502" cy="104" r="10"/><text class="num" x="498" y="108">3</text>
+  <text class="step" x="520" y="108">parseRespCommand</text>
+  <text class="note" x="500" y="132">reads a string_view over the</text>
+  <text class="note" x="500" y="148">buffer — zero copies</text>
+
+  <path class="arrow" d="M684 124 L722 124" marker-end="url(#h)"/>
+
+  <rect class="hot" x="722" y="86" width="210" height="76" rx="8"/>
+  <circle class="dot" cx="740" cy="104" r="10"/><text class="num" x="736" y="108">4</text>
+  <text class="step" x="758" y="108">CommandRegistry</text>
+  <text class="note" x="738" y="132">case-insensitive lookup,</text>
+  <text class="note" x="738" y="148">central arity check</text>
+
+  <path class="arrow" d="M827 162 L827 196 L722 196 L722 216" marker-end="url(#h)"/>
+
+  <!-- row 2 -->
+  <rect class="hot" x="612" y="216" width="220" height="76" rx="8"/>
+  <circle class="dot" cx="630" cy="234" r="10"/><text class="num" x="626" y="238">5</text>
+  <text class="step" x="648" y="238">Command::execute</text>
+  <text class="note" x="628" y="262">SetCommand parses NX/XX/EX,</text>
+  <text class="note" x="628" y="278">returns a Reply object</text>
+
+  <path class="arrow" d="M612 254 L560 254" marker-end="url(#h)"/>
+
+  <rect class="hot" x="340" y="216" width="220" height="76" rx="8"/>
+  <circle class="dot" cx="358" cy="234" r="10"/><text class="num" x="354" y="238">6</text>
+  <text class="step" x="376" y="238">Keyspace shard</text>
+  <text class="note" x="356" y="262">hash(key) &amp; 15 → one mutex;</text>
+  <text class="note" x="356" y="278">15 other shards stay free</text>
+
+  <path class="arrow" d="M340 254 L288 254" marker-end="url(#h)"/>
+
+  <rect class="box" x="88" y="216" width="200" height="76" rx="8"/>
+  <circle class="dot" cx="106" cy="234" r="10"/><text class="num" x="102" y="238">7</text>
+  <text class="step" x="124" y="238">unordered_map</text>
+  <text class="note" x="104" y="262">transparent hashing: the</text>
+  <text class="note" x="104" y="278">string_view probes directly</text>
+
+  <!-- return path -->
+  <path class="back" d="M188 292 L188 336 L860 336 L860 172" marker-end="url(#g)"/>
+  <text class="backlbl" x="392" y="356">reply path — Reply::encodeResp appends to one outbound string; the whole pipelined batch</text>
+  <text class="backlbl" x="392" y="374">leaves in a single write(2), attempted inline before any EPOLLOUT round-trip</text>
+
+  <text class="note" x="28" y="404">Cross-thread work (pub/sub delivery, market data) never touches a connection directly — it posts to that connection's owning event loop.</text>
+
+  <defs>
+    <marker id="h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#9ca3af"/>
+    </marker>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#16a34a"/>
+    </marker>
+  </defs>
+</svg>

@@ -1,0 +1,49 @@
+# Build trees
+build/
+build-*/
+cmake-build-*/
+out/
+_deps/
+
+# CMake artefacts
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+CTestTestfile.cmake
+install_manifest.txt
+Testing/
+
+# Compiled output
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.gcda
+*.gcno
+*.gcov
+coverage/
+*.profraw
+*.profdata
+
+# Runtime data
+data/
+*.aof
+*.rdb
+*.wal
+*.log
+
+# Editors / IDEs
+.vscode/
+.idea/
+.cache/
+*.swp
+*~
+.DS_Store
+
+# Profiling
+perf.data
+perf.data.old
+callgrind.out.*
+massif.out.*

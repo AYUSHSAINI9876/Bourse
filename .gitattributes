@@ -1,0 +1,31 @@
+# Normalise everything to LF in the repository and on checkout.
+#
+# Without this, Git on Windows checks files out with CRLF (core.autocrlf=true
+# by default). A shell script with a CRLF shebang fails in WSL, in Docker and
+# in CI with the famously unhelpful "bad interpreter: /usr/bin/env bash^M".
+# This project is developed on Windows and built on Linux, so LF everywhere is
+# the only setting that works in both.
+* text=auto eol=lf
+
+*.sh    text eol=lf
+*.cpp   text eol=lf
+*.hpp   text eol=lf
+*.cmake text eol=lf
+*.txt   text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+*.svg   text eol=lf
+*.html  text eol=lf
+Dockerfile text eol=lf
+
+# Binary assets, should they ever appear.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+
+# Keep generated and vendored trees out of language statistics and diffs.
+build/**    linguist-generated=true
+docs/img/*.svg linguist-documentation=true

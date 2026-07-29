@@ -1,0 +1,27 @@
+services:
+  bourse:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: bourse:latest
+    container_name: bourse
+    ports:
+      - "6380:6380"
+    command:
+      - --host=0.0.0.0
+      - --port=6380
+      - --maxmemory=256mb
+      - --maxmemory-policy=allkeys-lru
+      - --log-level=info
+    healthcheck:
+      # Speaks inline RESP over /dev/tcp so the image needs no redis-cli.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/6380 && printf 'PING\\r\\n' >&3 && head -c 7 <&3 | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
