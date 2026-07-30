@@ -24,6 +24,11 @@ add_executable(bourse_tests
   test_cache.cpp
   test_resp.cpp
   test_exec.cpp
+  test_match.cpp
+  test_sql.cpp
+  test_storage.cpp
+  test_btree.cpp
+  test_http.cpp
   test_net.cpp
 )
 

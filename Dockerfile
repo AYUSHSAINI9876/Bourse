@@ -22,6 +22,9 @@ COPY cmake/ ./cmake/
 COPY include/ ./include/
 COPY src/ ./src/
 COPY apps/ ./apps/
+# Required: cmake/EmbedAsset.cmake compiles this into the binary, so the build
+# fails without it rather than silently producing a server with no dashboard.
+COPY dashboard/ ./dashboard/
 
 # Tests need GoogleTest, which is not in this image; the release artefact does
 # not need them either. CI runs the suite separately.

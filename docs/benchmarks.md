@@ -84,6 +84,22 @@ Worth recording, because the instinct to optimise them is strong and would have 
 
 ---
 
+## Matching engine
+
+The order book is instrumented separately, under `bourse_match_latency_nanos`:
+
+```bash
+redis-cli -p 6380 ORDER AAPL SELL LIMIT 100 100.00
+redis-cli -p 6380 INFO | grep match
+```
+
+Two properties matter more than the raw number and are asserted by tests rather than measured:
+
+- **Steady-state order entry allocates nothing.** `OrderBookTest.SteadyStateOrderEntryStopsAllocating` submits and cancels 19,000 orders after warm-up and requires the `ObjectPool`'s chunk count not to move. An allocation on the hot path is a latency spike waiting to happen, so this is a correctness assertion, not a performance one.
+- **Cancel is O(1).** Orders carry their own intrusive list links, so removing one is an unlink with no search through the price level.
+
+---
+
 ## Reproducing with sanitizers
 
 Sanitizer builds are 2–5× slower and are not comparable to the numbers above. They exist to prove correctness, not speed:
@@ -92,4 +108,4 @@ Sanitizer builds are 2–5× slower and are not comparable to the numbers above.
 bash scripts/check-sanitizers.sh
 ```
 
-Current status: **ASan + UBSan clean, TSan clean**, 105/105 tests under both.
+Current status: **ASan + UBSan clean, TSan clean**, 228/228 tests under both.

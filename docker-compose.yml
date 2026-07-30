@@ -7,12 +7,18 @@ services:
     container_name: bourse
     ports:
       - "6380:6380"
+      - "8080:8080"
     command:
       - --host=0.0.0.0
       - --port=6380
+      - --http-port=8080
       - --maxmemory=256mb
       - --maxmemory-policy=allkeys-lru
+      - --appendonly=yes
+      - --dir=/home/bourse/data
       - --log-level=info
+    volumes:
+      - bourse-data:/home/bourse/data
     healthcheck:
       # Speaks inline RESP over /dev/tcp so the image needs no redis-cli.
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/6380 && printf 'PING\\r\\n' >&3 && head -c 7 <&3 | grep -q PONG"]
@@ -25,3 +31,6 @@ services:
       resources:
         limits:
           memory: 512M
+
+volumes:
+  bourse-data:

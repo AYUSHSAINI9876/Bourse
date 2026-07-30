@@ -56,7 +56,15 @@ Reply CommandRegistry::dispatch(CommandContext& context, const std::vector<std::
     return Reply::error("ERR wrong number of arguments for '" + std::string(command->name()) + "' command");
   }
 
-  return const_cast<Command*>(command)->execute(context, argv);
+  Reply reply = const_cast<Command*>(command)->execute(context, argv);
+
+  // Journal after the fact, and only on success. Logging before execution
+  // would persist commands that turned out to be rejected, and replaying those
+  // would produce a keyspace the original server never had.
+  if (context.server.journal && command->isWrite() && !reply.isError()) {
+    context.server.journal(argv);
+  }
+  return reply;
 }
 
 std::vector<std::string> CommandRegistry::commandNames() const {
@@ -74,6 +82,8 @@ std::unique_ptr<CommandRegistry> CommandRegistry::createDefault() {
   registerListCommands(*registry);
   registerCollectionCommands(*registry);
   registerPubSubCommands(*registry);
+  registerExchangeCommands(*registry);
+  registerSqlCommands(*registry);
   registerAdminCommands(*registry);
   BOURSE_LOG_INFO("command registry initialised with ", registry->size(), " verbs");
   return registry;

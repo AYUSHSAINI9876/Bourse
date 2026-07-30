@@ -7,7 +7,9 @@
 #include "bourse/core/logger.hpp"
 #include "bourse/core/metrics.hpp"
 #include "bourse/exec/reply.hpp"
+#include "bourse/net/http_codec.hpp"
 #include "bourse/net/resp_codec.hpp"
+#include "bourse/server/rest_api.hpp"
 
 namespace bourse::server {
 namespace {
@@ -63,6 +65,8 @@ Usage: bourse-server [options]
 
   --host <addr>              bind address                     (default 0.0.0.0)
   --port <n>                 RESP port                        (default 6380)
+  --http-port <n>            HTTP/dashboard port              (default 8080)
+  --no-http                  disable the HTTP listener
   --io-threads <n>           I/O event loops, 0 = auto        (default 0)
   --shards <n>               keyspace shards, power of two    (default 16)
   --maxmemory <size>         eviction budget, e.g. 256mb      (default unlimited)
@@ -71,6 +75,12 @@ Usage: bourse-server [options]
   --maxmemory-samples <n>    eviction sample size             (default 5)
   --log-level <level>        trace|debug|info|warn|error      (default info)
   --sync-logging             disable the async log consumer
+
+  --dir <path>               data directory                   (default ./bourse-data)
+  --appendonly <yes|no>      enable WAL + snapshot recovery    (default no)
+  --wal-sync <policy>        never | everysec | always        (default everysec)
+  --save-seconds <n>         background snapshot interval,
+                             0 disables                       (default 300)
   --help                     show this message
 )";
 }
@@ -114,6 +124,15 @@ Result<Config> Config::fromArgs(int argc, char** argv) {
         return Status::invalidArgument("--port must be 1..65535");
       }
       config.resp_port = static_cast<std::uint16_t>(port);
+    } else if (arg == "--http-port") {
+      BOURSE_ASSIGN_OR_RETURN(const std::string text, value_for("--http-port"));
+      std::size_t port = 0;
+      if (!parseUnsigned(text, port) || port == 0 || port > 65535) {
+        return Status::invalidArgument("--http-port must be 1..65535");
+      }
+      config.http_port = static_cast<std::uint16_t>(port);
+    } else if (arg == "--no-http") {
+      config.enable_http = false;
     } else if (arg == "--io-threads") {
       BOURSE_ASSIGN_OR_RETURN(const std::string text, value_for("--io-threads"));
       if (!parseUnsigned(text, config.io_threads)) {
@@ -140,6 +159,30 @@ Result<Config> Config::fromArgs(int argc, char** argv) {
       BOURSE_ASSIGN_OR_RETURN(config.log_level, value_for("--log-level"));
     } else if (arg == "--sync-logging") {
       config.async_logging = false;
+    } else if (arg == "--dir") {
+      BOURSE_ASSIGN_OR_RETURN(config.data_dir, value_for("--dir"));
+    } else if (arg == "--appendonly") {
+      BOURSE_ASSIGN_OR_RETURN(const std::string text, value_for("--appendonly"));
+      if (text == "yes" || text == "true" || text == "1") {
+        config.append_only = true;
+      } else if (text == "no" || text == "false" || text == "0") {
+        config.append_only = false;
+      } else {
+        return Status::invalidArgument("--appendonly must be yes or no");
+      }
+    } else if (arg == "--wal-sync") {
+      BOURSE_ASSIGN_OR_RETURN(config.wal_sync, value_for("--wal-sync"));
+      storage::WriteAheadLog::SyncPolicy probe{};
+      if (!storage::WriteAheadLog::parseSyncPolicy(config.wal_sync, probe)) {
+        return Status::invalidArgument("--wal-sync must be never, everysec or always");
+      }
+    } else if (arg == "--save-seconds") {
+      BOURSE_ASSIGN_OR_RETURN(const std::string text, value_for("--save-seconds"));
+      std::size_t seconds = 0;
+      if (!parseUnsigned(text, seconds)) {
+        return Status::invalidArgument("--save-seconds must be a non-negative integer");
+      }
+      config.snapshot_interval_seconds = static_cast<std::int64_t>(seconds);
     } else {
       return Status::invalidArgument("unknown option '" + std::string(arg) + "'");
     }
@@ -164,8 +207,27 @@ BourseServer::BourseServer(Config config)
       registry_(exec::CommandRegistry::createDefault()) {
   context_.keyspace = &keyspace_;
   context_.pubsub = &pubsub_;
+  context_.matching_engine = &matching_engine_;
+  context_.sql_engine = &sql_engine_;
   context_.started_at_ms = nowMillis();
   context_.version = "1.0.0";
+
+  // Every execution is republished on a pub/sub channel, so `SUBSCRIBE
+  // trades:AAPL` in one redis-cli window shows fills produced by orders typed
+  // into another. The engine itself knows nothing about pub/sub -- this is the
+  // Observer hook doing its job.
+  matching_engine_.addTradeObserver([this](const std::string& symbol, const match::Trade& trade) {
+    std::string payload;
+    payload.reserve(96);
+    payload.append(match::toString(trade.aggressor_side))
+        .append(" ")
+        .append(std::to_string(trade.quantity))
+        .append(" @ ")
+        .append(match::formatPrice(trade.price))
+        .append(" seq=")
+        .append(std::to_string(trade.sequence));
+    pubsub_.publish("trades:" + symbol, payload);
+  });
 }
 
 BourseServer::~BourseServer() {
@@ -192,13 +254,148 @@ Status BourseServer::start() {
     return std::make_unique<net::RespCodec>(*registry_, context_);
   });
 
+  // Recovery must complete before the listener accepts anything: a client that
+  // connected mid-replay could observe a keyspace that is only half restored.
+  if (config_.append_only) {
+    Result<std::size_t> replayed = recover();
+    if (!replayed.ok()) {
+      return replayed.status();
+    }
+  }
+
   BOURSE_TRY(resp_server_->start());
   installPubSubDelivery();
   startBackgroundCron();
 
   BOURSE_LOG_INFO("RESP endpoint ready on port ", resp_server_->port(), " -- try: redis-cli -p ",
                   resp_server_->port(), " PING");
+
+  if (config_.enable_http) {
+    BOURSE_TRY(startHttp());
+  }
   return Status::success();
+}
+
+std::string BourseServer::snapshotPath() const { return config_.data_dir + "/bourse.snapshot"; }
+
+std::string BourseServer::walPath() const { return config_.data_dir + "/bourse.wal"; }
+
+Result<std::size_t> BourseServer::recover() {
+  BOURSE_TRY(File::ensureDirectory(config_.data_dir));
+
+  // 1. Restore the newest full image.
+  if (storage::Snapshot::exists(snapshotPath())) {
+    Result<storage::SnapshotStats> loaded = storage::Snapshot::load(keyspace_, snapshotPath());
+    if (!loaded.ok()) {
+      // Refusing to start beats starting with silently wrong data.
+      return Status::corruption("snapshot recovery failed: " + loaded.status().message());
+    }
+    BOURSE_LOG_INFO("recovered ", loaded.value().keys, " key(s) from snapshot in ",
+                    loaded.value().duration_ms, "ms");
+  }
+
+  // 2. Replay everything journalled since that image was taken.
+  storage::WriteAheadLog::Options options;
+  options.path = walPath();
+  (void)storage::WriteAheadLog::parseSyncPolicy(config_.wal_sync, options.sync_policy);
+
+  Result<std::unique_ptr<storage::WriteAheadLog>> log = storage::WriteAheadLog::open(std::move(options));
+  if (!log.ok()) {
+    return log.status();
+  }
+  wal_ = std::move(log).value();
+
+  // The journal hook stays null during replay. Re-journalling replayed commands
+  // would double the log on every restart until it consumed the disk.
+  std::size_t applied = 0;
+  std::uint64_t truncated = 0;
+  Result<std::size_t> replayed = wal_->replay(
+      [&](const storage::WalRecord& record) {
+        exec::CommandContext command_context{context_, nullptr};
+        const exec::Reply reply = registry_->dispatch(command_context, record.argv);
+        if (reply.isError()) {
+          BOURSE_LOG_WARN("WAL replay: record ", record.sequence, " failed: ", reply.text());
+        } else {
+          ++applied;
+        }
+      },
+      &truncated);
+  if (!replayed.ok()) {
+    return replayed.status();
+  }
+
+  if (replayed.value() > 0 || truncated > 0) {
+    BOURSE_LOG_INFO("replayed ", applied, " of ", replayed.value(), " WAL record(s)",
+                    truncated > 0 ? " after discarding a torn tail" : "");
+  }
+
+  // Only now is it safe to start journalling live traffic.
+  context_.journal = [this](const std::vector<std::string>& argv) {
+    const Status status = wal_->append(argv);
+    if (!status.ok()) {
+      BOURSE_LOG_ERROR("WAL append failed: ", status.toString());
+    }
+  };
+
+  BOURSE_LOG_INFO("persistence enabled: dir=", config_.data_dir, " sync=", config_.wal_sync);
+  return applied;
+}
+
+Status BourseServer::persistSnapshot() {
+  if (!config_.append_only) {
+    return Status::success();
+  }
+  Result<storage::SnapshotStats> saved = storage::Snapshot::save(keyspace_, snapshotPath());
+  if (!saved.ok()) {
+    BOURSE_LOG_ERROR("snapshot failed: ", saved.status().toString());
+    return saved.status();
+  }
+  BOURSE_LOG_INFO("snapshot written: ", saved.value().keys, " key(s), ", saved.value().bytes, " bytes, ",
+                  saved.value().duration_ms, "ms");
+
+  // The snapshot now covers everything the log described, so the log can start
+  // over. This is what stops the WAL growing without bound.
+  if (wal_) {
+    BOURSE_TRY(wal_->reset());
+  }
+  return Status::success();
+}
+
+Status BourseServer::startHttp() {
+  router_.use(net::makeMetricsMiddleware());
+  router_.use(net::makeCorsMiddleware());
+  buildRestApi(router_, context_, *registry_);
+
+  net::ServerOptions options;
+  options.host = config_.host;
+  options.port = config_.http_port;
+  // Two I/O threads is plenty: the dashboard polls once a second and the REST
+  // endpoints delegate straight to the same command registry.
+  options.io_threads = 2;
+  options.name = "bourse-http";
+
+  http_server_ = std::make_unique<net::TcpServer>(
+      options, [this] { return std::make_unique<net::HttpCodec>(router_); });
+  BOURSE_TRY(http_server_->start());
+
+  // Its own acceptor thread, so a browser holding a keep-alive connection open
+  // can never delay the RESP acceptor.
+  http_thread_ = std::thread([this] { http_server_->runForever(); });
+
+  BOURSE_LOG_INFO("HTTP endpoint ready on port ", http_server_->port(), " -- dashboard at http://localhost:",
+                  http_server_->port(), "/  (", router_.routeCount(), " routes)");
+  return Status::success();
+}
+
+void BourseServer::stopHttp() {
+  if (!http_server_) {
+    return;
+  }
+  http_server_->acceptorLoop().stop();
+  if (http_thread_.joinable()) {
+    http_thread_.join();
+  }
+  http_server_->stop();
 }
 
 void BourseServer::installPubSubDelivery() {
@@ -249,6 +446,24 @@ void BourseServer::startBackgroundCron() {
       resp_server_->acceptorLoop().stop();
     }
   });
+
+  if (config_.append_only) {
+    // Group-commit tick for the `everysec` policy: one fsync per second
+    // regardless of write rate, rather than one per command.
+    resp_server_->acceptorLoop().scheduleEvery(200, [this] {
+      if (wal_) {
+        const Status status = wal_->maybeSync();
+        if (!status.ok()) {
+          BOURSE_LOG_ERROR("WAL sync failed: ", status.toString());
+        }
+      }
+    });
+
+    if (config_.snapshot_interval_seconds > 0) {
+      resp_server_->acceptorLoop().scheduleEvery(config_.snapshot_interval_seconds * 1000,
+                                                 [this] { (void)persistSnapshot(); });
+    }
+  }
 }
 
 void BourseServer::run() {
@@ -257,13 +472,26 @@ void BourseServer::run() {
     return;
   }
   resp_server_->runForever();
+  stopHttp();
   resp_server_->stop();
+
+  // Take a final image on a clean shutdown so the next start replays nothing.
+  if (config_.append_only) {
+    if (wal_) {
+      (void)wal_->sync();
+    }
+    (void)persistSnapshot();
+  }
+
   BOURSE_LOG_INFO("shutdown complete");
   Logger::instance().flush();
 }
 
 void BourseServer::requestShutdown() {
   shutdown_requested_.store(true, std::memory_order_release);
+  if (http_server_) {
+    http_server_->acceptorLoop().stop();
+  }
   if (resp_server_) {
     resp_server_->acceptorLoop().stop();
   }
@@ -272,5 +500,7 @@ void BourseServer::requestShutdown() {
 std::uint16_t BourseServer::respPort() const noexcept {
   return resp_server_ ? resp_server_->port() : 0;
 }
+
+std::uint16_t BourseServer::httpPort() const noexcept { return http_server_ ? http_server_->port() : 0; }
 
 }  // namespace bourse::server

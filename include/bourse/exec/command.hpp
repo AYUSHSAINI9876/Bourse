@@ -16,6 +16,9 @@ class Keyspace;
 namespace bourse::match {
 class MatchingEngine;
 }
+namespace bourse::sql {
+class Engine;
+}
 namespace bourse::net {
 class Connection;
 }
@@ -31,6 +34,16 @@ struct ServerContext {
   cache::Keyspace* keyspace = nullptr;
   PubSub* pubsub = nullptr;
   match::MatchingEngine* matching_engine = nullptr;
+  sql::Engine* sql_engine = nullptr;
+
+  /// Write-ahead journal hook. Null when persistence is disabled.
+  ///
+  /// Installed by the server and invoked by the registry, not by individual
+  /// commands. Putting it in one place means a newly added write verb is
+  /// journalled automatically -- it only has to answer `isWrite()` honestly --
+  /// and that RESP and REST can never drift apart on what gets persisted.
+  std::function<void(const std::vector<std::string>&)> journal;
+
   std::int64_t started_at_ms = 0;
   std::string version = "1.0.0";
 };
@@ -147,5 +160,10 @@ void registerCollectionCommands(CommandRegistry& registry);
 void registerAdminCommands(CommandRegistry& registry);
 /// Installs SUBSCRIBE/UNSUBSCRIBE/PUBLISH.
 void registerPubSubCommands(CommandRegistry& registry);
+/// Installs ORDER/CANCEL/AMEND/BOOK/TRADES/SYMBOLS/EXCHANGE. These are no-ops
+/// that answer with an error unless a MatchingEngine is present in the context.
+void registerExchangeCommands(CommandRegistry& registry);
+/// Installs SQL/EXPLAIN/TABLES/DESCRIBE.
+void registerSqlCommands(CommandRegistry& registry);
 
 }  // namespace bourse::exec

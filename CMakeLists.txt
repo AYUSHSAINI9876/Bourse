@@ -44,6 +44,12 @@ add_library(bourse_core STATIC
   src/core/socket.cpp
   src/core/file.cpp
 
+  # L1 -- durable storage
+  src/storage/wal.cpp
+  src/storage/snapshot.cpp
+  src/storage/buffer_pool.cpp
+  src/storage/bplus_tree.cpp
+
   # L2 -- in-memory keyspace
   src/cache/value.cpp
   src/cache/eviction.cpp
@@ -53,7 +59,20 @@ add_library(bourse_core STATIC
   src/exec/reply.cpp
   src/exec/command_registry.cpp
   src/exec/commands.cpp
+  src/exec/exchange_commands.cpp
+  src/exec/sql_commands.cpp
   src/exec/pubsub.cpp
+
+  # L3b -- SQL execution
+  src/sql/ast.cpp
+  src/sql/lexer.cpp
+  src/sql/parser.cpp
+  src/sql/executor.cpp
+  src/sql/engine.cpp
+
+  # L4 -- matching engine
+  src/match/order_book.cpp
+  src/match/matching_engine.cpp
 
   # L5 -- network and protocols
   src/net/poller.cpp
@@ -61,9 +80,12 @@ add_library(bourse_core STATIC
   src/net/connection.cpp
   src/net/server.cpp
   src/net/resp_codec.cpp
+  src/net/http_codec.cpp
+  src/net/router.cpp
 
   # server assembly
   src/server/bourse_server.cpp
+  src/server/rest_api.cpp
 )
 
 target_include_directories(bourse_core
@@ -87,6 +109,29 @@ endif()
 
 bourse_set_warnings(bourse_core)
 bourse_enable_sanitizers(bourse_core)
+
+# ---------------------------------------------------------------------------
+# Embedded dashboard
+# ---------------------------------------------------------------------------
+# dashboard/index.html is compiled into the binary as a string_view, so
+# bourse-server is a single self-contained artefact with no asset path to get
+# wrong at deploy time and no static-file handler to secure.
+set(BOURSE_DASHBOARD_SRC ${CMAKE_CURRENT_SOURCE_DIR}/dashboard/index.html)
+set(BOURSE_DASHBOARD_HDR ${CMAKE_BINARY_DIR}/generated/bourse/dashboard_asset.hpp)
+add_custom_command(
+  OUTPUT ${BOURSE_DASHBOARD_HDR}
+  COMMAND ${CMAKE_COMMAND}
+          -DINPUT_FILE=${BOURSE_DASHBOARD_SRC}
+          -DOUTPUT_FILE=${BOURSE_DASHBOARD_HDR}
+          -DVARIABLE_NAME=kDashboardHtml
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedAsset.cmake
+  DEPENDS ${BOURSE_DASHBOARD_SRC} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedAsset.cmake
+  COMMENT "Embedding dashboard/index.html"
+  VERBATIM)
+add_custom_target(bourse_dashboard_asset DEPENDS ${BOURSE_DASHBOARD_HDR})
+add_dependencies(bourse_core bourse_dashboard_asset)
+target_sources(bourse_core PRIVATE ${BOURSE_DASHBOARD_HDR})
+target_include_directories(bourse_core PUBLIC $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/generated>)
 
 # ---------------------------------------------------------------------------
 # Executables

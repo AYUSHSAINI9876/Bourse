@@ -1,11 +1,12 @@
 # Bourse
 
-**A from-scratch trading exchange with its own storage engine, cache, and query layer.** Modern C++20, no third-party runtime dependencies, an `epoll` reactor written by hand, and wire compatibility with `redis-cli`.
+**A from-scratch trading exchange with its own storage engine, cache, and query layer.** Modern C++20, zero third-party runtime dependencies, a hand-written `epoll` reactor, and wire compatibility with `redis-cli`.
 
 <p>
   <img alt="C++20" src="https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white">
   <img alt="CMake" src="https://img.shields.io/badge/build-CMake%20%2B%20Ninja-064F8C?logo=cmake&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-105%20passing-2ea043">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-228%20passing-2ea043">
+  <img alt="Sanitizers" src="https://img.shields.io/badge/ASan%20%C2%B7%20UBSan%20%C2%B7%20TSan-clean-2ea043">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Linux%20%C2%B7%20WSL%20%C2%B7%20Docker-333">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
@@ -14,31 +15,106 @@
 
 ## What this is
 
-A real exchange is not one system, it is five stacked on top of each other: a low-latency matching core, a durable journal, an in-memory state store, a query layer for historical data, and multi-protocol client access. Bourse builds that stack from the bottom up, in one coherent codebase, with every layer written from scratch — no Boost, no libuv, no hiredis.
+A real exchange is not one system, it is five stacked on top of each other: a low-latency matching core, a durable journal, an in-memory state store, a query layer for historical data, and multi-protocol client access. Bourse builds that whole stack from scratch in one coherent codebase — no Boost, no libuv, no hiredis, no SQLite.
 
-**Right now the bottom half is real and running.** You can point `redis-cli` at it and it answers, correctly, at speed, with 46 commands and full pipelining support. The upper layers are designed and scaffolded but not yet implemented; the [roadmap](#roadmap) says exactly where the line is, and the architecture diagram draws it.
+All five layers are built and tested. You can point `redis-cli` at it, `curl` at it, or open the dashboard in a browser, and all three reach the same command registry.
 
 <p align="center">
-  <img src="docs/img/architecture.svg" alt="Bourse layered architecture: L0 core, L1 storage, L2 cache, L3 exec, L4 match, L5 net, L6 dashboard" width="100%">
+  <img src="docs/img/architecture.svg" alt="Bourse layered architecture: core, storage, cache, exec, match, sql, net, dashboard" width="100%">
 </p>
 
 ---
 
-## Status: honest scorecard
+## The 60-second demo
+
+```bash
+bash scripts/build.sh
+bash scripts/demo.sh                 # guided tour of every layer, then leaves the server up
+```
+
+Or start it yourself:
+
+```bash
+./build/bin/bourse-server            # RESP on 6380, HTTP + dashboard on 8080
+```
+
+**It is a Redis server.** Stock `redis-cli`, nothing custom:
+
+```console
+$ redis-cli -p 6380
+127.0.0.1:6380> SET user:1 ayush EX 300
+OK
+127.0.0.1:6380> INCRBY pageviews 99
+(integer) 99
+127.0.0.1:6380> RPUSH queue a b c
+(integer) 3
+127.0.0.1:6380> GET queue
+(error) WRONGTYPE Operation against a key holding the wrong kind of value
+```
+
+**It is an exchange.** Price-time priority, real order types:
+
+```console
+127.0.0.1:6380> ORDER AAPL SELL LIMIT 10 100.50
+1) "order_id"   2) (integer) 1
+3) "status"     4) "NEW"
+127.0.0.1:6380> ORDER AAPL BUY LIMIT 4 101.00
+3) "status"     4) "FILLED"
+11) "trades"    12) 1) 1) "sequence"  2) (integer) 1
+                      3) "price"     4) "100.50"    <-- resting price, not 101
+127.0.0.1:6380> BOOK AAPL
+```
+
+**It is a database.** Real lexer, parser, AST, and query plan:
+
+```console
+127.0.0.1:6380> SQL CREATE TABLE fills (id INTEGER PRIMARY KEY, sym TEXT, qty INTEGER)
+OK
+127.0.0.1:6380> SQL INSERT INTO fills VALUES (1, 'AAPL', 100), (2, 'MSFT', 50)
+127.0.0.1:6380> SQL SELECT sym, qty * 2 AS doubled FROM fills WHERE qty > 60 ORDER BY qty DESC
+127.0.0.1:6380> EXPLAIN SELECT * FROM fills WHERE qty > 60 LIMIT 1
+"Limit(limit=1, offset=0)
+   Filter((qty > 60), examined=1, passed=1)
+     SeqScan(fills, rows=2)"
+```
+
+**It has an on-disk index.** A 4 KiB pager with a free list, a pinning buffer pool, and a B+ tree with node splits and range scans — 10,000 keys in a tree four levels deep, verified structurally after every mutation batch:
+
+```cpp
+BPlusTree tree(pool, disk);
+tree.insert("AAPL:20260730:0930", record_id);
+tree.scan("AAPL:20260730:0900", "AAPL:20260730:1000", visit);   // one descent, then a leaf walk
+tree.validate();                                                 // sorted, balanced, correctly threaded
+```
+
+**It survives a crash.** `--appendonly yes` turns on the WAL:
+
+```bash
+./build/bin/bourse-server --appendonly yes --dir ./data &
+redis-cli -p 6380 SET survivor "still here"
+kill -9 %1                                   # no clean shutdown, no flush
+./build/bin/bourse-server --appendonly yes --dir ./data &
+redis-cli -p 6380 GET survivor               # "still here"
+```
+
+**It has a live dashboard.** Open <http://localhost:8080> — depth ladder, trade tape, latency histogram, command console, keyspace browser. One self-contained HTML page compiled into the binary.
+
+---
+
+## Status
 
 | Layer | Component | State |
 |---|---|:--|
-| **L0** `core/` | RAII `File` / `Socket`, `ByteBuffer`, bounded `ThreadPool`, lock-free `SpscRing`, `ObjectPool`, `Arena`, async `Logger`, HDR-style `Histogram` | ✅ **Shipped** |
-| **L2** `cache/` | 16-shard `Keyspace`, `Value` variant, lazy + active TTL expiry, sampled LRU/LFU/Random/NoEviction | ✅ **Shipped** |
-| **L3a** `exec/` | `Command` interface, dispatch registry, 46 verbs, protocol-independent `Reply`, `PubSub` | ✅ **Shipped** |
-| **L5** `net/` | `Poller` abstraction (epoll + poll), `EventLoop`, acceptor + N I/O reactors, `RespCodec` | ✅ **Shipped** |
-| **L1** `storage/` | Pager, buffer pool, B+ tree, WAL + crash recovery, snapshots | 🚧 Planned |
-| **L3b** `sql/` | Lexer → parser → AST → Visitor → volcano executor | 🚧 Planned |
-| **L4** `match/` | Order book, price-time priority, LIMIT/MARKET/IOC/FOK | 🚧 Planned |
-| **L5+** `net/` | HTTP codec, router, middleware chain, WebSocket | 🚧 Planned |
-| **L6** `dashboard/` | Depth chart, trade tape, latency histogram, SQL console | 🚧 Planned |
-
-Nothing in the ✅ rows is a stub. Every one is covered by tests that fail if you break it.
+| **L0** `core/` | RAII `File`/`Socket`, `ByteBuffer`, bounded `ThreadPool`, lock-free `SpscRing`, `ObjectPool`, `Arena`, async `Logger`, HDR-style `Histogram` | ✅ |
+| **L1** `storage/` | `WriteAheadLog` with CRC-32 framing, torn-tail recovery, 3 fsync policies; atomic checksummed `Snapshot`; `DiskManager` + pinning `BufferPool` + on-disk `BPlusTree` | ✅ |
+| **L2** `cache/` | 16-shard `Keyspace`, `Value` variant, lazy + active TTL expiry, sampled LRU/LFU/Random/NoEviction | ✅ |
+| **L3a** `exec/` | `Command` interface, dispatch registry, 57 verbs, protocol-independent `Reply`, `PubSub`, journal hook | ✅ |
+| **L3b** `sql/` | Lexer → recursive-descent parser → AST → **Visitor** → volcano iterators | ✅ |
+| **L4** `match/` | Order book, price-time priority, LIMIT/MARKET/IOC/FOK, amend, Observer market data | ✅ |
+| **L5** `net/` | `Poller` (epoll + poll), `EventLoop`, acceptor + N reactors, `RespCodec`, `HttpCodec`, `Router`, middleware | ✅ |
+| **L6** `dashboard/` | Depth ladder, trade tape, latency bars, command console, keyspace browser | ✅ |
+| — | Wiring the B+ tree in behind the SQL row store (the tree is built and tested; the executor still reads from memory) | 🚧 |
+| — | WebSocket streaming (the dashboard polls once a second instead) | 🚧 |
 
 ---
 
@@ -49,69 +125,25 @@ Nothing in the ✅ rows is a stub. Every one is covered by tests that fail if yo
 Linux, or Windows with WSL2. One command provisions everything:
 
 ```bash
-wsl -d Ubuntu --user root -- bash scripts/setup-wsl.sh
+wsl -d Ubuntu --user root -- bash scripts/setup-wsl.sh    # from Windows
+sudo bash scripts/setup-wsl.sh                            # on native Linux
 ```
 
-That installs `g++`, `cmake`, `ninja`, `libgtest-dev`, and `redis-tools` (for the demo). On a native Linux box, run it with `sudo bash scripts/setup-wsl.sh`.
+Installs `g++`, `cmake`, `ninja`, `libgtest-dev`, `redis-tools` and `curl`.
 
-### Build and run
+### Build, run, test
 
 ```bash
-bash scripts/build.sh              # RelWithDebInfo + tests
-./build/bin/bourse-server --port 6380
+bash scripts/build.sh                    # RelWithDebInfo + tests
+./build/bin/bourse-server                # start it
+ctest --test-dir build --output-on-failure
 ```
 
 ```
-2026-07-29 17:32:44.235 [INFO ] command registry initialised with 46 verbs
-2026-07-29 17:32:44.236 [INFO ] bourse-resp listening on 0.0.0.0:6380 (poller=epoll, io_threads=8)
-2026-07-29 17:32:44.236 [INFO ] RESP endpoint ready on port 6380 -- try: redis-cli -p 6380 PING
-```
-
-### Talk to it with a client nobody here wrote
-
-```console
-$ redis-cli -p 6380
-127.0.0.1:6380> PING
-PONG
-127.0.0.1:6380> SET user:1 ayush EX 300
-OK
-127.0.0.1:6380> GET user:1
-"ayush"
-127.0.0.1:6380> TTL user:1
-(integer) 300
-127.0.0.1:6380> INCR pageviews
-(integer) 1
-127.0.0.1:6380> INCRBY pageviews 99
-(integer) 100
-127.0.0.1:6380> RPUSH queue a b c
-(integer) 3
-127.0.0.1:6380> LRANGE queue 0 -1
-1) "a"
-2) "b"
-3) "c"
-127.0.0.1:6380> HSET session:9 user ayush role admin
-(integer) 2
-127.0.0.1:6380> HGETALL session:9
-1) "user"
-2) "ayush"
-3) "role"
-4) "admin"
-127.0.0.1:6380> GET queue
-(error) WRONGTYPE Operation against a key holding the wrong kind of value
-127.0.0.1:6380> INFO
-# Server
-bourse_version:1.0.0
-uptime_in_seconds:42
-...
-```
-
-Pipelining works too — 1000 commands in one stream:
-
-```bash
-for i in $(seq 1 1000); do echo "SET pipe:$i $i"; done | redis-cli -p 6380 --pipe
-# All data transferred. Waiting for the last reply...
-# Last reply received from server.
-# errors: 0, replies: 1000
+2026-07-30 09:14:02.118 [INFO ] command registry initialised with 57 verbs
+2026-07-30 09:14:02.119 [INFO ] bourse-resp listening on 0.0.0.0:6380 (poller=epoll, io_threads=4)
+2026-07-30 09:14:02.119 [INFO ] RESP endpoint ready on port 6380 -- try: redis-cli -p 6380 PING
+2026-07-30 09:14:02.121 [INFO ] HTTP endpoint ready on port 8080 -- dashboard at http://localhost:8080/  (16 routes)
 ```
 
 ### Docker
@@ -119,138 +151,138 @@ for i in $(seq 1 1000); do echo "SET pipe:$i $i"; done | redis-cli -p 6380 --pip
 ```bash
 docker compose up --build -d
 redis-cli -p 6380 PING          # PONG
-docker compose down
 ```
 
-The runtime image is a two-stage build — no compiler, no build tree, ~80 MB.
+Two-stage build: no compiler in the runtime image, non-root user, ~80 MB.
 
-### Command-line options
+### Options
 
 ```
 --host <addr>              bind address                     (default 0.0.0.0)
 --port <n>                 RESP port                        (default 6380)
+--http-port <n>            HTTP/dashboard port              (default 8080)
+--no-http                  disable the HTTP listener
 --io-threads <n>           I/O event loops, 0 = auto        (default 0)
 --shards <n>               keyspace shards, power of two    (default 16)
 --maxmemory <size>         eviction budget, e.g. 256mb      (default unlimited)
 --maxmemory-policy <name>  allkeys-lru | allkeys-lfu |
                            allkeys-random | noeviction      (default allkeys-lru)
 --maxmemory-samples <n>    eviction sample size             (default 5)
+--dir <path>               data directory                   (default ./bourse-data)
+--appendonly <yes|no>      enable WAL + snapshot recovery   (default no)
+--wal-sync <policy>        never | everysec | always        (default everysec)
+--save-seconds <n>         snapshot interval, 0 disables    (default 300)
 --log-level <level>        trace|debug|info|warn|error      (default info)
 ```
 
 ---
 
-## Testing
+## Testing — how to verify everything, fast
 
-Three independent layers of verification. All three are wired into CI.
-
-### 1. Unit and integration suite — 105 tests, 23 suites
+Four independent layers of verification. One command runs them all:
 
 ```bash
-bash scripts/build.sh
-./build/bin/bourse_tests
-# or, through CTest:
-ctest --test-dir build --output-on-failure
+bash scripts/verify-all.sh
 ```
 
-```
-[==========] 105 tests from 23 test suites ran. (516 ms total)
-[  PASSED  ] 105 tests.
-```
+Or individually:
 
-These are not smoke tests. A sample of what they actually pin down:
+| What | Command | Result |
+|---|---|---|
+| Unit + integration | `./build/bin/bourse_tests` | **228 tests, 41 suites** |
+| KV over real `redis-cli` | `bash scripts/smoke-test.sh` | **68 assertions** |
+| HTTP + exchange | `bash scripts/smoke-exchange.sh` | **42 assertions** |
+| Crash recovery | `bash scripts/smoke-persistence.sh` | **27 assertions** |
+| ASan + UBSan + TSan | `bash scripts/check-sanitizers.sh` | **clean** |
+| Throughput + latency | `bash scripts/benchmark.sh` | see below |
 
-- **`RespParser.ReportsIncompleteForEveryProperPrefix`** — feeds the parser *every* prefix of a valid command and requires that it never claims success and never consumes a byte until the frame is whole. This is the classic "assumed one `read()` = one request" bug, tested exhaustively.
-- **`ServerFixture.HandlesRequestsSplitAcrossPackets`** — the same property over a real TCP socket, one byte at a time with sleeps in between.
+The tests are not decorative. A representative sample of what they pin down:
+
+- **`RespParser.ReportsIncompleteForEveryProperPrefix`** and its HTTP twin — feed the parser *every* prefix of a valid request and require that it never claims success and never consumes a byte until the frame is whole. The classic "assumed one `read()` = one request" bug, tested exhaustively.
+- **`ServerFixture.HandlesRequestsSplitAcrossPackets`** — the same property over a real TCP socket, one byte at a time.
+- **`OrderBookTest.FillOrKillIsAllOrNothing`** — a FOK that cannot fill must leave the resting book *byte-for-byte untouched*, having emitted no trades.
+- **`OrderBookTest.RepricingLosesTimePriority`** — an amended order must go to the back of a queue it never waited in.
+- **`OrderBookTest.SteadyStateOrderEntryStopsAllocating`** — asserts the pool's chunk count stops moving after warm-up, which is the actual property the pool exists for.
+- **`WriteAheadLog.TruncatesATornTailAndKeepsGoing`** — half a record from a crash is discarded, everything before it survives, and the log is writable again.
+- **`SnapshotTest.RefusesToLoadADamagedImage`** — one flipped byte and recovery *refuses to start* rather than silently serving wrong data.
+- **`SqlFixture.LimitStopsPullingRows`** — asserts via the plan's own counters that `LIMIT 5` over 500 rows examines exactly 5.
+- **`BTreeFixture.InterleavedInsertAndEraseStayConsistent`** — 3000 randomised inserts and deletes, then a full structural `validate()`: sorted keys in every node, separators consistent with subtree contents, all leaves at equal depth, leaf chain correctly threaded. A subtly wrong B+ tree still answers most lookups correctly, so spot checks are not enough.
+- **`BufferPoolTest.RefusesToEvictPinnedPages`** — the pool reports exhaustion rather than pulling a page out from under a caller holding it.
+- **`SqlFixture.UpdateEvaluatesAgainstThePreUpdateRow`** — `SET a = b, b = a` must swap, not duplicate.
 - **`Keyspace.ConcurrentIncrementsLoseNothing`** — 8 threads × 2000 increments must produce exactly the arithmetic total.
-- **`SpscRing.SingleProducerSingleConsumerDeliversEverything`** — 200k items across a lock-free ring with ordering assertions on every one.
-- **`ObjectPool.SteadyStateStopsAllocating`** — asserts the chunk count stops moving after warm-up, which is the actual property the pool exists for.
-- **`Keyspace.NoEvictionRejectsWritesInsteadOfDroppingData`** — proves the policy refuses writes rather than silently discarding your data.
+- **`RouterTest.MiddlewareCanShortCircuit`** — a middleware that does not call `next()` must stop the chain before the handler.
 
-### 2. End-to-end smoke test — 68 assertions via real `redis-cli`
+---
 
-```bash
-bash scripts/smoke-test.sh
-```
+## Benchmarks
 
-```
-==> starting bourse-server on port 6390
-  ok   PING                                       -> PONG
-  ok   GET greeting (appended)                    -> hello world
-  ok   INCR on non-numeric                        -> ERR value is not an integer or out of range
-  ok   GET on a list (WRONGTYPE)                  -> WRONGTYPE Operation against a key holding the wrong kind of value
-  ok   redis-cli --pipe reports 0 errors          -> 1
-  ...
--------------------------------------------
-passed: 68   failed: 0
--------------------------------------------
-```
+**Machine:** 4-core WSL2 VM, GCC 15.2.0, `RelWithDebInfo`, 200k requests, 50 clients, stock `redis-benchmark`.
 
-Wire compatibility is demonstrated, not claimed — the client is stock `redis-cli`.
+| Workload | Throughput | Client p50 |
+|---|--:|--:|
+| `SET`, no pipelining | 42,992 ops/s | 0.535 ms |
+| `GET`, no pipelining | 43,592 ops/s | 0.535 ms |
+| `SET`, pipeline depth 16 | **501,253 ops/s** | 0.623 ms |
+| `GET`, pipeline depth 16 | **598,802 ops/s** | 0.647 ms |
 
-### 3. Sanitizers — ASan, UBSan and TSan all clean
-
-```bash
-bash scripts/check-sanitizers.sh
-```
-
-Builds and runs the whole suite twice: once under **ASan + UBSan** (with `detect_leaks=1`), once under **TSan**. ASan and TSan are mutually exclusive, hence two build trees.
+Server-side, from the built-in HDR histogram over 1,000,005 commands:
 
 ```
-===================================================================
-  AddressSanitizer + UndefinedBehaviorSanitizer
-===================================================================
-[==========] 105 tests from 23 test suites ran. (836 ms total)
-[  PASSED  ] 105 tests.
-PASS: AddressSanitizer + UndefinedBehaviorSanitizer
-
-===================================================================
-  ThreadSanitizer
-===================================================================
-[==========] 105 tests from 23 test suites ran. (1115 ms total)
-[  PASSED  ] 105 tests.
-PASS: ThreadSanitizer
-
-===================================================================
-  all sanitizer suites clean
-===================================================================
+command_latency_p50_ns:576
+command_latency_p99_ns:2304
 ```
 
-The concurrency tests are the point here: TSan is exercising 8-thread keyspace contention, the lock-free SPSC ring, the multi-reactor server with 32 concurrent clients, and cross-loop pub/sub delivery. Clean under those is a meaningful result, not a formality.
+**p50 576 ns, p99 2.3 µs** for the full path: parse → registry lookup → arity check → shard lock → hash probe → mutate → encode.
+
+The unpipelined figures are **client-bound, not server-bound** — in sequential mode each client waits for a reply before sending again, so 43k ops/s measures loopback round-trip, which is exactly why the server's own histogram reports sub-microsecond work for the same commands. The 14× jump under pipelining is that round-trip being amortised away. Full discussion in [docs/benchmarks.md](docs/benchmarks.md).
 
 ---
 
 ## Design decisions worth defending
 
-The comments in this codebase explain *why*, not *what*. A representative selection:
+The comments in this codebase explain *why*, not *what*. A selection:
 
-**Sixteen shards with a plain `std::mutex`, not a `std::shared_mutex`.**
-Reads are not read-only — every `GET` updates the entry's eviction metadata, so a `shared_lock` would be an outright data race. The options were atomic metadata (extra cost on every access, still torn across two fields) or exclusive locking with enough shards that contention stops mattering. The simple, obviously-correct option won. → [`keyspace.hpp`](include/bourse/cache/keyspace.hpp)
+**Sixteen shards with a plain `std::mutex`, not a `std::shared_mutex`.** Reads are not read-only — every `GET` updates eviction metadata, so a `shared_lock` would be an outright data race. The alternatives were atomic metadata (cost on every access, still torn across two fields) or exclusive locking with enough shards that it stops mattering. → [`keyspace.hpp`](include/bourse/cache/keyspace.hpp)
 
-**Sampled eviction, not exact LRU.**
-Exact LRU needs an intrusive list touched on every read — turning every read into a write plus a pointer chase through cold memory. Bourse draws a small random sample and ranks only that, which is why `--maxmemory-samples` exists. Random bucket probing keeps sampling O(1); `std::advance` from `begin()` would have made eviction quadratic. → [`eviction.hpp`](include/bourse/cache/eviction.hpp)
+**Sampled eviction, not exact LRU.** Exact LRU needs an intrusive list touched on every read — turning every read into a write plus a pointer chase through cold memory. Bourse samples and ranks, which is why `--maxmemory-samples` exists. Random *bucket* probing keeps sampling O(1); `std::advance` from `begin()` would make eviction quadratic. → [`eviction.hpp`](include/bourse/cache/eviction.hpp)
 
-**A 64-bit token in the poller, not a pointer.**
-A pointer registered with the kernel outlives the C++ object if a connection is destroyed between `epoll_wait` returning and the dispatch — dereferencing it is a use-after-free. An integer id forces the dispatcher back through the connection table, where a stale token simply misses. → [`poller.hpp`](include/bourse/net/poller.hpp)
+**A 64-bit token in the poller, not a pointer.** A pointer registered with the kernel outlives the C++ object if a connection dies between `epoll_wait` returning and dispatch — dereferencing it is a use-after-free. An integer id forces the dispatcher back through the connection table, where a stale token simply misses. → [`poller.hpp`](include/bourse/net/poller.hpp)
 
-**Commands return `Reply` objects, not bytes.**
-That indirection is what lets one command set serve three transports: RESP encodes it, the REST layer will render it as JSON, and tests inspect it structurally without parsing anything. Returning pre-encoded RESP — the obvious shortcut — would weld the command set to one wire format. → [`reply.hpp`](include/bourse/exec/reply.hpp)
+**Commands return `Reply` objects, not bytes.** That one indirection is why RESP, REST and the dashboard cannot drift apart: there is one implementation behind all three, and the test suite inspects results structurally without parsing anything. → [`reply.hpp`](include/bourse/exec/reply.hpp)
 
-**A bounded thread-pool queue.**
-An unbounded queue converts overload into unbounded memory growth and then an OOM kill. A bounded queue converts it into backpressure, which is what a server actually wants. → [`thread_pool.hpp`](include/bourse/core/thread_pool.hpp)
+**Journalling lives in the registry, not in commands.** One hook after dispatch, gated on `Command::isWrite()`. A new write verb is persisted automatically and both transports are covered by construction. Journalling *after* execution and only on success matters too — logging first would persist commands that were then rejected. → [`command_registry.cpp`](src/exec/command_registry.cpp)
 
-**Cache-line separation in the SPSC ring.**
-The producer writes `write_`, the consumer writes `read_`. Sharing a line means every push invalidates the consumer's copy — textbook false sharing, roughly 4× throughput on x86. Each side also caches the *other* cursor so that in steady state it never touches the other's line at all. → [`spsc_ring.hpp`](include/bourse/core/spsc_ring.hpp)
+**Prices are integer ticks.** `0.1 + 0.2 != 0.3` in binary floating point, so two orders that should cross at the same price compare unequal. There is a test for exactly that. → [`order.hpp`](include/bourse/match/order.hpp)
 
-**Inline writes before buffering.**
-`Connection::send` tries the socket first. Buffering and waiting for `EPOLLOUT` would add a full loop iteration of latency to every single reply; only a partial write parks the remainder and arms writability. → [`connection.cpp`](src/net/connection.cpp)
+**Trades print at the resting order's price.** Price improvement accrues to the side that was patient enough to sit on the book — the incentive every venue wants, and a classic thing to get backwards. → [`order_book.cpp`](src/match/order_book.cpp)
 
-**`std::string_view` over the read buffer.**
-The RESP parser never copies to tokenise. `ByteBuffer` compacts by `memmove`-ing only the *unread* region before it will reallocate, so a long-lived connection reaches a steady state and stops allocating entirely. → [`byte_buffer.cpp`](src/core/byte_buffer.cpp)
+**Fill-or-kill checks liquidity before consuming any.** A partial fill it then had to unwind would already have emitted trades that market-data consumers saw. → [`order_book.cpp`](src/match/order_book.cpp)
 
-### A bug this design caught
+**Visitor over the SQL AST.** The node set is closed and stable; the *operations* keep growing — evaluate, print for EXPLAIN, collect referenced columns, type-check. Virtual methods on every node would mean editing four classes per operation. There are two visitors in the tree already, and adding the second required changing no node. → [`ast.hpp`](include/bourse/sql/ast.hpp)
 
-The first parser required `\r\n` to terminate an inline command. Stricter, and wrong: Redis accepts a bare `\n` too, so every client producing Unix line endings — `redis-cli --pipe`, shell heredocs, `netcat` from a file — hung waiting for a reply that never came. The smoke test caught it because it drives a real client rather than a hand-rolled one. Fix and regression test: [`test_resp.cpp`](tests/test_resp.cpp) → `ParsesInlineCommandWithBareLf`.
+**A volcano-model executor.** Uniform `open`/`next`/`close` means `LIMIT 10` over a million rows stops the scan after ten without any operator knowing about any other. The cost is a virtual call per row per operator — which is exactly why real engines moved to vectorised execution, and worth being able to say out loud. → [`engine.hpp`](include/bourse/sql/engine.hpp)
+
+**NULL is a distinct alternative, not a sentinel.** SQL's three-valued logic is not expressible in-band: `NULL = NULL` is NULL, and `WHERE x = NULL` matches nothing. Making it a type forces every comparison site to decide. → [`ast.cpp`](src/sql/ast.cpp)
+
+**A B+ tree, not a hash index.** A hash index answers point lookups in O(1) and range scans not at all. `WHERE ts BETWEEN a AND b`, `ORDER BY price` and "the next 50 rows" are all range queries, and they are most of what a trading system asks. Values live only in leaves so internal nodes fan out ~62 ways — a test asserts 10,000 keys produce a tree at most 4 levels deep. Leaves are singly linked so a range scan never walks back up. → [`bplus_tree.hpp`](include/bourse/storage/bplus_tree.hpp)
+
+**Pinning is what makes the buffer pool safe.** Eviction only ever considers unpinned frames; if all are pinned the pool reports exhaustion rather than pulling a page from under a caller. Forgetting to unpin therefore leaks a frame instead of causing a use-after-free — the failure mode you want. A `PageGuard` makes every early return in the tree code safe. → [`buffer_pool.hpp`](include/bourse/storage/buffer_pool.hpp)
+
+**CRC-32 on every WAL record.** Not paranoia — it is the only way to tell a torn tail from a crash (truncate, carry on) from corruption mid-file (refuse to start). Without it, replay would feed half a command into the keyspace. → [`wal.cpp`](src/storage/wal.cpp)
+
+**Snapshots are written to a temp file and renamed.** A crash mid-write leaves the previous good snapshot or a stray `.tmp` — never a truncated image that `load()` would accept as complete. → [`snapshot.cpp`](src/storage/snapshot.cpp)
+
+**Cache-line separation in the SPSC ring.** Producer writes `write_`, consumer writes `read_`; sharing a line means every push invalidates the consumer's copy. Each side also caches the *other* cursor so in steady state it never touches the other's line. → [`spsc_ring.hpp`](include/bourse/core/spsc_ring.hpp)
+
+**Inline writes before buffering.** `Connection::send` tries the socket first; buffering and waiting for `EPOLLOUT` would add a full loop iteration to every reply. → [`connection.cpp`](src/net/connection.cpp)
+
+### Bugs the tests actually caught
+
+1. **Inline commands need bare `\n`.** The first RESP parser demanded `\r\n`. Stricter, and wrong — `redis-cli --pipe`, shell heredocs and `netcat` all send LF only, and they hung. Caught because the smoke test drives a *real* client. → `test_resp.cpp::ParsesInlineCommandWithBareLf`
+2. **`NOT` bound too tightly in SQL.** Parsed as an ordinary prefix operator, `NOT symbol = 'AAPL'` became `(NOT symbol) = 'AAPL'` and returned zero rows instead of two — wrong answers, no error. SQL precedence is `OR < AND < NOT < comparison`. → `test_sql.cpp::NotBindsLooserThanComparison`
+3. **A double unpin in B+ tree deletion.** When the root leaf emptied, an explicit `unpin` ran after the `PageGuard` had already released the frame. The pool rejected it loudly instead of silently corrupting the pin count — which is exactly why `unpin` validates. → `test_btree.cpp::ErasingEverythingLeavesAUsableTree`
+4. **A data race in eviction.** `enforceMemoryBudget` compared `shard.memory_bytes` across shards without holding their locks. The fix copies each size out under its own lock.
+5. **`std::thread::get_id()` after `join()`** returns the default id, not the thread's — a test failed for entirely the wrong reason.
 
 ---
 
@@ -262,59 +294,42 @@ The first parser required `\r\n` to terminate an inline command. Stricter, and w
 
 ---
 
-## Supported commands (46)
+## Commands (57)
 
 | Group | Commands |
 |---|---|
-| **Strings** | `SET` (with `EX`/`PX`/`NX`/`XX`), `GET`, `SETEX`, `APPEND`, `STRLEN` |
+| **Strings** | `SET` (`EX`/`PX`/`NX`/`XX`), `GET`, `SETEX`, `APPEND`, `STRLEN` |
 | **Counters** | `INCR`, `DECR`, `INCRBY`, `DECRBY` |
-| **Generic** | `DEL`, `EXISTS`, `TYPE`, `KEYS` (glob) |
+| **Generic** | `DEL`, `EXISTS`, `TYPE`, `KEYS` |
 | **Expiry** | `EXPIRE`, `PEXPIRE`, `TTL`, `PTTL`, `PERSIST` |
 | **Lists** | `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LLEN`, `LRANGE` |
 | **Hashes** | `HSET`, `HGET`, `HGETALL`, `HDEL`, `HLEN` |
 | **Sets** | `SADD`, `SREM`, `SISMEMBER`, `SMEMBERS`, `SCARD` |
 | **Pub/Sub** | `SUBSCRIBE`, `UNSUBSCRIBE`, `PUBLISH`, `PUBSUB` |
+| **Exchange** | `ORDER`, `CANCEL`, `AMEND`, `BOOK`, `TRADES`, `SYMBOLS`, `EXCHANGE` |
+| **SQL** | `SQL`, `EXPLAIN`, `TABLES`, `DESCRIBE` |
 | **Server** | `PING`, `ECHO`, `INFO`, `DBSIZE`, `FLUSHALL`, `COMMAND`, `CONFIG`, `QUIT` |
 
-Integer-encoded values are a real internal optimisation — `INCR` on a counter never parses or re-serialises a string — and are invisible to clients, exactly as in Redis.
+Every execution is republished to `trades:<SYMBOL>`, so `SUBSCRIBE trades:AAPL` in one terminal shows fills produced by orders typed into another.
 
----
+## HTTP endpoints (16)
 
-## Benchmarks
-
-`redis-benchmark` ships with `redis-tools`, so the standard tool measures Bourse unmodified:
-
-```bash
-bash scripts/benchmark.sh
-```
-
-### Measured results
-
-**Machine:** 4-core WSL2 VM (kernel 6.6.87.2-microsoft-standard-WSL2), GCC 15.2.0, `RelWithDebInfo`, 200,000 requests, 50 concurrent clients.
-
-| Workload | Throughput | Client-observed p50 |
-|---|--:|--:|
-| `SET`, no pipelining | 42,992 ops/s | 0.535 ms |
-| `GET`, no pipelining | 43,592 ops/s | 0.535 ms |
-| `INCR`, no pipelining | 42,114 ops/s | 0.527 ms |
-| `SET`, pipeline depth 16 | **501,253 ops/s** | 0.623 ms |
-| `GET`, pipeline depth 16 | **598,802 ops/s** | 0.647 ms |
-
-Server-side command latency, straight from the built-in HDR histogram after 1,000,005 commands:
-
-```
-total_commands_processed:1000005
-command_latency_p50_ns:576
-command_latency_p99_ns:2304
-```
-
-**p50 576 ns, p99 2.3 µs** for the full dispatch path: parse → registry lookup → arity check → shard lock → hash probe → mutate → encode reply.
-
-### Reading these honestly
-
-The unpipelined figures are **client-bound, not server-bound**. Sequential mode means each client waits for a reply before sending again, so ~43k ops/s is measuring round-trip time over WSL2 loopback, not the server's capacity — which is exactly why the server-side histogram reports sub-microsecond work for the same commands. The pipelined figures are the ones that actually load the server, and the 14× jump between them is the round-trip cost being amortised away.
-
-WSL2 loopback also understates native Linux noticeably. Run it on your own hardware and record *that* number with the machine spec beside it — quoting someone else's throughput figure is worth nothing in an interview, and quoting your own without the machine is worth little more.
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/` | dashboard (embedded in the binary) |
+| `GET` | `/health` | liveness + uptime |
+| `GET` | `/metrics` | Prometheus exposition format |
+| `GET` | `/api/stats` | keyspace, engine and latency percentiles |
+| `GET`/`PUT`/`DELETE` | `/api/keys/:key` | key CRUD |
+| `GET` | `/api/keys?pattern=` | glob scan |
+| `POST` | `/api/command` | run any verb, JSON reply |
+| `POST` | `/api/sql` | run SQL, JSON result set |
+| `GET` | `/api/tables` | table list |
+| `GET` | `/api/book/:symbol` | depth snapshot |
+| `GET` | `/api/trades/:symbol` | recent tape |
+| `GET` | `/api/symbols` | traded symbols |
+| `POST` | `/api/orders` | submit an order |
+| `DELETE` | `/api/orders/:symbol/:id` | cancel |
 
 ---
 
@@ -322,51 +337,51 @@ WSL2 loopback also understates native Linux noticeably. Run it on your own hardw
 
 ```
 Bourse/
-├── include/bourse/          public headers, one directory per layer
-│   ├── core/                RAII wrappers, buffers, concurrency, metrics
-│   ├── cache/               keyspace, value type, eviction policies
-│   ├── exec/                command interface, registry, reply, pub/sub
-│   ├── net/                 poller, event loop, connection, server, codecs
-│   └── server/              configuration and top-level assembly
+├── include/bourse/{core,storage,cache,exec,sql,match,net,server}/
 ├── src/                     implementations, mirroring include/
 ├── apps/bourse_server/      the executable
-├── tests/                   GoogleTest suites (105 tests)
+├── tests/                   10 GoogleTest files, 228 tests
+├── dashboard/index.html     embedded at build time by cmake/EmbedAsset.cmake
 ├── scripts/
 │   ├── setup-wsl.sh         one-shot toolchain provisioning
 │   ├── build.sh             configure + build
-│   ├── syntax-check.sh      fast type-check without linking
-│   ├── smoke-test.sh        end-to-end via real redis-cli
-│   └── check-sanitizers.sh  ASan+UBSan and TSan runs
+│   ├── demo.sh              guided tour of every layer
+│   ├── verify-all.sh        every check, one command
+│   ├── smoke-test.sh        KV over real redis-cli
+│   ├── smoke-exchange.sh    HTTP + matching engine
+│   ├── smoke-persistence.sh SIGKILL and recover
+│   ├── check-sanitizers.sh  ASan+UBSan and TSan
+│   └── benchmark.sh         redis-benchmark + server histogram
 ├── cmake/                   warnings, sanitizers, asset embedding
-├── docs/img/                architecture and request-flow diagrams
-├── .github/workflows/ci.yml build matrix, sanitizers, tidy, Docker
-├── Dockerfile               multi-stage, non-root, ~80 MB runtime
-└── docker-compose.yml
+├── docs/                    architecture.md, benchmarks.md, diagrams
+├── .github/workflows/ci.yml matrix, sanitizers, tidy, Docker
+└── Dockerfile               multi-stage, non-root
 ```
 
 ---
 
 ## Roadmap
 
-Each phase is a complete, demoable release on its own — the project is never in a half-built state.
-
-- [x] **v0.1 — Redis-compatible server.** `epoll` reactor, RESP2, 46 verbs, TTL, eviction, pub/sub, 105 tests.
-- [ ] **v0.2 — HTTP.** `HttpCodec`, router with path params, middleware chain (Chain of Responsibility), `/metrics` in Prometheus format, plus a reactor-vs-thread-pool benchmark using the existing `Poller` abstraction.
-- [ ] **v0.3 — Storage engine.** Pager, buffer pool with LRU-K, on-disk B+ tree, WAL with crash recovery, snapshot + AOF persistence for the keyspace.
-- [ ] **v0.4 — SQL.** Lexer → recursive-descent parser → AST → Visitor-based binder → volcano-model iterators over the B+ tree.
-- [ ] **v1.0 — The exchange.** Order book with price-time priority, `LIMIT`/`MARKET`/`IOC`/`FOK`, zero-allocation hot path over the existing `ObjectPool` and `SpscRing`, trades journalled to the WAL, market data over WebSocket.
-- [ ] **v1.1 — Dashboard.** Single self-contained HTML page: live depth chart, trade tape, latency histogram, SQL console.
+- [x] **v0.1** Redis-compatible server — epoll reactor, RESP2, TTL, eviction, pub/sub
+- [x] **v0.2** HTTP — codec, router, middleware chain, `/metrics`, REST API, dashboard
+- [x] **v0.3** Durability — WAL with CRC framing and torn-tail recovery, atomic snapshots
+- [x] **v0.4** SQL — lexer, parser, AST, Visitor, volcano executor
+- [x] **v1.0** Exchange — order book, price-time priority, LIMIT/MARKET/IOC/FOK, market data
+- [x] **v1.1** On-disk B+ tree — 4 KiB pager with a free list, pinning buffer pool, node splits, range scans
+- [ ] **v1.2** Wire the B+ tree in behind the SQL row store, so tables live on disk
+- [ ] **v1.3** WebSocket streaming so the dashboard pushes instead of polling
+- [ ] **v1.4** Replication and consistent-hash sharding
 
 ---
 
-## Building on other platforms
+## Building elsewhere
 
-The `Poller` interface has two implementations: `epoll` on Linux and portable `poll` everywhere else. The codebase compiles on Windows via the Winsock paths in `socket.cpp` and `poller.cpp`, but Linux is the tested, supported target — `perf`, `valgrind` and `redis-benchmark` all live there, and so does the interesting half of the systems work.
+`Poller` has two implementations: `epoll` on Linux, portable `poll` everywhere else. Windows compiles via the Winsock paths, but Linux is the tested target — `perf`, `valgrind` and `redis-benchmark` all live there.
 
 ```bash
 bash scripts/syntax-check.sh          # type-check every TU without linking
-bash scripts/build.sh Debug address   # Debug + AddressSanitizer
-bash scripts/build.sh Debug thread    # Debug + ThreadSanitizer
+bash scripts/build.sh Debug address   # + AddressSanitizer
+bash scripts/build.sh Debug thread    # + ThreadSanitizer
 ```
 
 ---

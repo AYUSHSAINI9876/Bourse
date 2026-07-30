@@ -52,8 +52,14 @@ jobs:
       - name: Unit and integration tests
         run: ctest --test-dir build --output-on-failure --parallel 2
 
-      - name: End-to-end smoke test against redis-cli
+      - name: Smoke — keyspace over redis-cli
         run: bash scripts/smoke-test.sh 6399
+
+      - name: Smoke — HTTP and matching engine
+        run: bash scripts/smoke-exchange.sh 6398 8099
+
+      - name: Smoke — crash recovery
+        run: bash scripts/smoke-persistence.sh 6397
 
   sanitizers:
     name: ${{ matrix.sanitizer }}
