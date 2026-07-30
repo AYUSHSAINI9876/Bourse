@@ -35,7 +35,15 @@ data/
 *.log
 
 # Editors / IDEs
-.vscode/
+#
+# .vscode/ is deliberately committed: the build/test/debug wiring is part of
+# the project, not personal preference, and it is what makes the repo work on
+# a fresh clone. Only genuinely per-user files are ignored.
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
 .idea/
 .cache/
 *.swp

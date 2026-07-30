@@ -1,0 +1,66 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Debug the whole test suite. Breakpoints in any src/ or tests/ file
+      // work; the build is RelWithDebInfo so symbols are present.
+      "name": "Debug: unit tests",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/bin/bourse_tests",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "environment": [{ "name": "BOURSE_LOG_LEVEL", "value": "off" }],
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "preLaunchTask": "Build",
+      "setupCommands": [
+        { "description": "pretty-print STL containers",
+          "text": "-enable-pretty-printing", "ignoreFailures": true }
+      ]
+    },
+    {
+      // Debug one test. Change the filter, or use the ${input} prompt below.
+      "name": "Debug: one test (prompts for filter)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/bin/bourse_tests",
+      "args": ["--gtest_filter=${input:testFilter}", "--gtest_break_on_failure"],
+      "cwd": "${workspaceFolder}",
+      "environment": [{ "name": "BOURSE_LOG_LEVEL", "value": "off" }],
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "preLaunchTask": "Build",
+      "setupCommands": [
+        { "text": "-enable-pretty-printing", "ignoreFailures": true }
+      ]
+    },
+    {
+      // Debug the live server. Set a breakpoint in a command handler, then
+      // drive it from another terminal with `redis-cli -p 6380 ...`.
+      "name": "Debug: server",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/bin/bourse-server",
+      "args": ["--port", "6380", "--http-port", "8080", "--log-level", "debug"],
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "preLaunchTask": "Build",
+      "setupCommands": [
+        { "text": "-enable-pretty-printing", "ignoreFailures": true },
+        // The server ignores SIGPIPE deliberately; without this gdb stops on
+        // every disconnected client and the session is unusable.
+        { "text": "handle SIGPIPE nostop noprint pass", "ignoreFailures": true }
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "id": "testFilter",
+      "type": "promptString",
+      "description": "GoogleTest filter, e.g. OrderBookTest.* or *FillOrKill*",
+      "default": "*"
+    }
+  ]
+}

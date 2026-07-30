@@ -1,0 +1,97 @@
+{
+  "version": "2.0.0",
+  "options": {
+    // Every task runs bash inside WSL. Running them from a Windows shell
+    // would pick up the broken MinGW toolchain instead of g++ 15.
+    "cwd": "${workspaceFolder}"
+  },
+  "presentation": { "clear": true, "panel": "dedicated" },
+  "tasks": [
+    {
+      "label": "Build",
+      "type": "shell",
+      "command": "bash scripts/build.sh",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Build (Debug + AddressSanitizer)",
+      "type": "shell",
+      "command": "BOURSE_BUILD_DIR=build-asan bash scripts/build.sh Debug address",
+      "group": "build",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Build (Debug + ThreadSanitizer)",
+      "type": "shell",
+      "command": "BOURSE_BUILD_DIR=build-tsan bash scripts/build.sh Debug thread",
+      "group": "build",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Syntax check (fast, no link)",
+      "type": "shell",
+      "command": "bash scripts/syntax-check.sh",
+      "problemMatcher": ["$gcc"]
+    },
+
+    {
+      "label": "Test: unit suite",
+      "type": "shell",
+      "command": "BOURSE_LOG_LEVEL=off ./build/bin/bourse_tests --gtest_brief=1",
+      "group": { "kind": "test", "isDefault": true },
+      "dependsOn": "Build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Test: current file's suite",
+      "type": "shell",
+      // Runs only the tests in the file you have open, matched by its stem:
+      // test_match.cpp -> --gtest_filter=*Match*|*Order*
+      "command": "BOURSE_LOG_LEVEL=off ./build/bin/bourse_tests --gtest_filter='*${fileBasenameNoExtension}*' || BOURSE_LOG_LEVEL=off ./build/bin/bourse_tests",
+      "dependsOn": "Build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Test: everything (unit + 3 smoke suites)",
+      "type": "shell",
+      "command": "bash scripts/verify-all.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Test: sanitizers (ASan+UBSan, TSan)",
+      "type": "shell",
+      "command": "bash scripts/check-sanitizers.sh",
+      "problemMatcher": []
+    },
+
+    {
+      "label": "Run: server",
+      "type": "shell",
+      "command": "./build/bin/bourse-server --port 6380 --http-port 8080",
+      "dependsOn": "Build",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Run: guided demo",
+      "type": "shell",
+      "command": "bash scripts/demo.sh",
+      "dependsOn": "Build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run: benchmark",
+      "type": "shell",
+      "command": "bash scripts/benchmark.sh",
+      "dependsOn": "Build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Run: redis-cli",
+      "type": "shell",
+      "command": "redis-cli -p 6380",
+      "problemMatcher": []
+    }
+  ]
+}

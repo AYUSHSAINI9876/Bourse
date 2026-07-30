@@ -131,6 +131,31 @@ sudo bash scripts/setup-wsl.sh                            # on native Linux
 
 Installs `g++`, `cmake`, `ninja`, `libgtest-dev`, `redis-tools` and `curl`.
 
+### Opening it in an editor
+
+The toolchain lives in WSL, so the folder must be opened **in WSL mode** — not
+as a plain Windows folder. Otherwise the C++ extension finds no compiler and
+every include shows a red squiggle.
+
+```bash
+code --remote wsl+Ubuntu /mnt/c/Users/ayush/Github/Bourse
+```
+
+Or from an already-open VS Code window: `Ctrl+Shift+P` → **WSL: Reopen Folder in WSL**.
+
+The bottom-left corner should read `WSL: Ubuntu`. Once it does, `.vscode/` wires
+up the rest:
+
+| Shortcut | What it does |
+|---|---|
+| `Ctrl+Shift+B` | build |
+| `Ctrl+Shift+P` → *Run Task* | test suite, smoke suites, sanitizers, benchmark, demo |
+| `F5` | debug the tests or the server under gdb, with breakpoints |
+
+IntelliSense reads `build/compile_commands.json`, so it uses the real compiler
+flags rather than guessing — run a build once and go-to-definition works
+across the whole tree.
+
 ### Build, run, test
 
 ```bash

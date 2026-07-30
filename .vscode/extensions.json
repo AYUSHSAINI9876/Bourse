@@ -1,0 +1,10 @@
+{
+  // VS Code prompts to install these the first time the folder is opened.
+  "recommendations": [
+    // The important one: the toolchain lives in WSL, not on Windows.
+    "ms-vscode-remote.remote-wsl",
+    "ms-vscode.cpptools",
+    "ms-vscode.cmake-tools",
+    "llvm-vs-code-extensions.vscode-clangd"
+  ]
+}
