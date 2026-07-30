@@ -134,7 +134,19 @@ TEST(WriteAheadLog, TruncatesATornTailAndKeepsGoing) {
     ASSERT_TRUE(file.ok());
     Result<std::uint64_t> size = file.value().size();
     ASSERT_TRUE(size.ok());
-    const std::string garbage("BOUR\xff\xff\x00\x00\x11\x22\x33\x44partial", 24);
+    // A plausible-looking record header -- magic, an absurd length, a
+    // checksum -- with no payload behind it, which is exactly what a crash
+    // mid-write leaves.
+    //
+    // Built by appending rather than as one literal with a hand-counted
+    // length: the escapes make the true size non-obvious, and getting it wrong
+    // reads past the end of the literal. AddressSanitizer caught precisely
+    // that here.
+    std::string garbage;
+    garbage.append("BOUR");                // magic
+    garbage.append("\xff\xff\x00\x00", 4);  // length prefix
+    garbage.append("\x11\x22\x33\x44", 4);  // checksum
+    garbage.append("partial");              // truncated payload
     ASSERT_TRUE(file.value().writeAt(size.value(), garbage.data(), garbage.size()).ok());
   }
 
