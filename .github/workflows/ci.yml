@@ -61,6 +61,11 @@ jobs:
       - name: Smoke — crash recovery
         run: bash scripts/smoke-persistence.sh 6397
 
+      # Guards the split deployment: a dropped CORS header or a regression in
+      # $PORT handling breaks the hosted demo while every other test stays green.
+      - name: Smoke — split deployment
+        run: bash scripts/smoke-deploy.sh
+
   sanitizers:
     name: ${{ matrix.sanitizer }}
     runs-on: ubuntu-latest

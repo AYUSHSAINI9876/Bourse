@@ -1,6 +1,7 @@
 #include "bourse/server/bourse_server.hpp"
 
 #include <charconv>
+#include <cstdlib>
 #include <sstream>
 
 #include "bourse/core/clock.hpp"
@@ -56,6 +57,30 @@ bool parseUnsigned(std::string_view text, std::size_t& out) {
   return true;
 }
 
+/// Applies defaults taken from the environment.
+///
+/// Container platforms -- Render, Railway, Cloud Run, Heroku, Fly -- assign the
+/// public port at run time and pass it in $PORT rather than on the command
+/// line, because the command line is baked into the image. Reading it here is
+/// the whole reason the same image deploys to any of them unchanged.
+///
+/// Called before argv is parsed, so an explicit flag still wins. A malformed
+/// value is an error rather than a silent fallback: a server that quietly binds
+/// a port the platform is not routing to looks alive and answers nothing.
+Status applyEnvironmentDefaults(Config& config) {
+  if (const char* port = std::getenv("PORT"); port != nullptr && *port != '\0') {
+    std::size_t parsed = 0;
+    if (!parseUnsigned(port, parsed) || parsed == 0 || parsed > 65535) {
+      return Status::invalidArgument("PORT must be 1..65535, got '" + std::string(port) + "'");
+    }
+    config.http_port = static_cast<std::uint16_t>(parsed);
+  }
+  if (const char* host = std::getenv("BOURSE_HOST"); host != nullptr && *host != '\0') {
+    config.host = host;
+  }
+  return Status::success();
+}
+
 }  // namespace
 
 std::string Config::usage() {
@@ -82,11 +107,19 @@ Usage: bourse-server [options]
   --save-seconds <n>         background snapshot interval,
                              0 disables                       (default 300)
   --help                     show this message
+
+Environment (read first; any flag above overrides it):
+  PORT                       HTTP/dashboard port. Container platforms assign
+                             this at run time, so the image needs no rebuild.
+  BOURSE_HOST                bind address
 )";
 }
 
 Result<Config> Config::fromArgs(int argc, char** argv) {
   Config config;
+  if (const Status environment = applyEnvironmentDefaults(config); !environment.ok()) {
+    return environment;
+  }
 
   const auto need_value = [&](int& i, std::string_view flag) -> Result<std::string> {
     if (i + 1 >= argc) {

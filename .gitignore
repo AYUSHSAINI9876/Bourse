@@ -27,6 +27,10 @@ coverage/
 *.profraw
 *.profdata
 
+# Static deploy output: generated from dashboard/index.html by web/build.sh
+web/dist/
+.vercel/
+
 # Runtime data
 data/
 *.aof

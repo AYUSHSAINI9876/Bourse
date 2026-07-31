@@ -5,7 +5,7 @@
 <p>
   <img alt="C++20" src="https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white">
   <img alt="CMake" src="https://img.shields.io/badge/build-CMake%20%2B%20Ninja-064F8C?logo=cmake&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-228%20passing-2ea043">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-235%20passing-2ea043">
   <img alt="Sanitizers" src="https://img.shields.io/badge/ASan%20%C2%B7%20UBSan%20%C2%B7%20TSan-clean-2ea043">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Linux%20%C2%B7%20WSL%20%C2%B7%20Docker-333">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
@@ -214,10 +214,11 @@ Or individually:
 
 | What | Command | Result |
 |---|---|---|
-| Unit + integration | `./build/bin/bourse_tests` | **228 tests, 41 suites** |
+| Unit + integration | `./build/bin/bourse_tests` | **235 tests, 43 suites** |
 | KV over real `redis-cli` | `bash scripts/smoke-test.sh` | **68 assertions** |
 | HTTP + exchange | `bash scripts/smoke-exchange.sh` | **42 assertions** |
 | Crash recovery | `bash scripts/smoke-persistence.sh` | **27 assertions** |
+| Split deployment (CORS, `$PORT`) | `bash scripts/smoke-deploy.sh` | **16 assertions** |
 | ASan + UBSan + TSan | `bash scripts/check-sanitizers.sh` | **clean** |
 | Throughput + latency | `bash scripts/benchmark.sh` | see below |
 
@@ -236,6 +237,7 @@ The tests are not decorative. A representative sample of what they pin down:
 - **`SqlFixture.UpdateEvaluatesAgainstThePreUpdateRow`** — `SET a = b, b = a` must swap, not duplicate.
 - **`Keyspace.ConcurrentIncrementsLoseNothing`** — 8 threads × 2000 increments must produce exactly the arithmetic total.
 - **`RouterTest.MiddlewareCanShortCircuit`** — a middleware that does not call `next()` must stop the chain before the handler.
+- **`ConfigEnvironmentTest.MalformedPortIsAnErrorRatherThanASilentFallback`** — a bad `$PORT` must stop the process. Falling back to the default would start a server the platform never routes to: healthy logs, every request timing out.
 
 ---
 
@@ -365,8 +367,9 @@ Bourse/
 ├── include/bourse/{core,storage,cache,exec,sql,match,net,server}/
 ├── src/                     implementations, mirroring include/
 ├── apps/bourse_server/      the executable
-├── tests/                   10 GoogleTest files, 228 tests
+├── tests/                   12 GoogleTest files, 235 tests
 ├── dashboard/index.html     embedded at build time by cmake/EmbedAsset.cmake
+├── web/build.sh             stamps the backend URL into a copy for static hosting
 ├── scripts/
 │   ├── setup-wsl.sh         one-shot toolchain provisioning
 │   ├── build.sh             configure + build
@@ -375,11 +378,14 @@ Bourse/
 │   ├── smoke-test.sh        KV over real redis-cli
 │   ├── smoke-exchange.sh    HTTP + matching engine
 │   ├── smoke-persistence.sh SIGKILL and recover
+│   ├── smoke-deploy.sh      cross-origin dashboard → server, $PORT
 │   ├── check-sanitizers.sh  ASan+UBSan and TSan
 │   └── benchmark.sh         redis-benchmark + server histogram
 ├── cmake/                   warnings, sanitizers, asset embedding
-├── docs/                    architecture.md, benchmarks.md, diagrams
+├── docs/                    architecture.md, benchmarks.md, deployment.md, diagrams
 ├── .github/workflows/ci.yml matrix, sanitizers, tidy, Docker
+├── vercel.json              frontend deploy (static dashboard)
+├── render.yaml              backend deploy (Docker blueprint)
 └── Dockerfile               multi-stage, non-root
 ```
 
@@ -396,6 +402,31 @@ Bourse/
 - [ ] **v1.2** Wire the B+ tree in behind the SQL row store, so tables live on disk
 - [ ] **v1.3** WebSocket streaming so the dashboard pushes instead of polling
 - [ ] **v1.4** Replication and consistent-hash sharding
+
+---
+
+## Deploying
+
+Full walkthrough: **[docs/deployment.md](docs/deployment.md)** — GitHub push through to two live URLs.
+
+The deployment is split, because Vercel cannot host this server and no amount of configuration changes that. Vercel runs serverless functions scoped to a single request; Bourse is a resident multi-threaded `epoll` reactor that holds TCP connections open and keeps the keyspace, order books and buffer pool in process memory. A cache that forgets everything between requests is not a cache.
+
+```
+Browser ──HTTPS──► Vercel (dashboard, static, CDN) ──fetch/CORS──► Render (bourse-server in Docker)
+```
+
+| Half | Host | Why |
+|---|---|---|
+| Dashboard | **Vercel** | One dependency-free HTML file. `web/build.sh` stamps the backend URL into a copy of the *same* file the binary embeds, so there is no second copy to keep in sync. |
+| Server | **Render** (free, Docker) | Builds the existing `Dockerfile`. Reads `$PORT`, so the image deploys unchanged to Railway, Cloud Run or Fly.io too. |
+
+```bash
+bash scripts/smoke-deploy.sh    # proves the split works before you deploy it
+```
+
+That starts the server, builds the static bundle, serves it from a *different* origin and asserts the whole path — `$PORT` handling, CORS pre-flight, cross-origin `GET`/`POST`, the injected URL, and that the embedded copy still defaults to same-origin. In a browser every one of those failures looks identical: a blank page and a console message nobody opens.
+
+Two things worth knowing about the free tier, both covered in the guide: Render sleeps after 15 minutes idle and takes ~50 s to wake, and only the HTTP port is public, so `redis-cli` cannot reach the deployed instance. Fly.io can expose RESP on 6380 if that matters.
 
 ---
 

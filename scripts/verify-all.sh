@@ -40,6 +40,7 @@ stage "unit and integration tests" env BOURSE_LOG_LEVEL=off ./build/bin/bourse_t
 stage "smoke: keyspace over redis-cli"  bash scripts/smoke-test.sh 6390
 stage "smoke: HTTP and matching engine" bash scripts/smoke-exchange.sh 6392 8092
 stage "smoke: crash recovery"           bash scripts/smoke-persistence.sh 6393
+stage "smoke: split deployment"         bash scripts/smoke-deploy.sh
 
 if [[ "${BOURSE_SANITIZERS:-0}" == "1" ]]; then
   stage "sanitizers (ASan+UBSan, TSan)" bash scripts/check-sanitizers.sh

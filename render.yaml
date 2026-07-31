@@ -1,0 +1,49 @@
+# Render blueprint -- the backend half of the deployment.
+#
+# Vercel runs serverless functions with a request-scoped lifetime, so it cannot
+# host this server: Bourse is a long-lived multi-threaded epoll reactor that
+# holds TCP connections open and keeps the keyspace, order books and buffer
+# pool in process memory. It needs a container. This is that container, built
+# from the same Dockerfile used locally.
+#
+# Render reads this file automatically when you create a Blueprint from the
+# repo, so none of the settings below have to be re-entered in the web UI.
+services:
+  - type: web
+    name: bourse
+    runtime: docker
+    # No `repo:` on purpose -- omitting it means "the repository this blueprint
+    # was created from", so nothing here has to be edited after forking.
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    # Free instances are available in every Render region; Singapore is the
+    # closest to India and knocks roughly 150 ms off each dashboard poll.
+    region: singapore
+    healthCheckPath: /health
+    autoDeploy: true
+
+    # Render injects $PORT and routes public traffic to it; Config::fromArgs
+    # reads that before argv, which is why no port appears on this line. The
+    # RESP listener still binds 6380 inside the container, but Render's free
+    # web services publish exactly one HTTP port, so redis-cli cannot reach it
+    # from outside. The REST API exposes the same commands over HTTP.
+    #
+    # 200mb against the free tier's 512 MB leaves headroom for the buffer pool
+    # and per-connection buffers; allkeys-lru means a demo that gets hammered
+    # sheds cold keys instead of being OOM-killed.
+    dockerCommand: >-
+      /usr/local/bin/bourse-server
+      --host 0.0.0.0
+      --maxmemory 200mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --dir /home/bourse/data
+      --log-level info
+
+    # Free instances have no persistent disk and are recycled when idle, so the
+    # WAL and snapshots live in the container filesystem. Recovery is real and
+    # works across a process restart; it does not survive the instance being
+    # replaced. Attaching a disk mounted at /home/bourse/data on a paid plan
+    # makes it durable, with no change to the command above.

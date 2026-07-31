@@ -30,6 +30,7 @@ add_executable(bourse_tests
   test_btree.cpp
   test_http.cpp
   test_net.cpp
+  test_config.cpp
 )
 
 target_link_libraries(bourse_tests PRIVATE bourse_core ${BOURSE_GTEST_TARGET})

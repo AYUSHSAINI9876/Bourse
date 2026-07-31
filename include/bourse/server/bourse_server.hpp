@@ -52,6 +52,10 @@ struct Config {
   std::size_t expire_sample_per_shard = 20;
 
   /// Parses `--key value` and `--key=value` argv pairs.
+  ///
+  /// Environment variables are read first and argv overrides them, so a
+  /// container image can carry a fixed command line and still take its port
+  /// from the platform: $PORT sets `http_port`, $BOURSE_HOST sets `host`.
   static Result<Config> fromArgs(int argc, char** argv);
   [[nodiscard]] std::string describe() const;
   [[nodiscard]] static std::string usage();

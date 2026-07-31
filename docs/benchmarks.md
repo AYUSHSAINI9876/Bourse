@@ -108,4 +108,4 @@ Sanitizer builds are 2–5× slower and are not comparable to the numbers above.
 bash scripts/check-sanitizers.sh
 ```
 
-Current status: **ASan + UBSan clean, TSan clean**, 228/228 tests under both.
+Current status: **ASan + UBSan clean, TSan clean**, 235/235 tests under both.

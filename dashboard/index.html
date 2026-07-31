@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bourse — live console</title>
+<!-- Deploy-time injection point.
+     Empty means "same origin", which is what the server binary needs when it
+     serves this page itself. web/build.sh rewrites this exact line during a
+     static deploy so the CDN copy knows which backend to call. Keep it on one
+     line and keep the spacing: the build step is a literal replacement. -->
+<script>window.BOURSE_API_BASE = "";</script>
 <style>
   /* No external anything: no CDN, no webfont, no build step. The server is a
      single binary and this page is baked into it. */
@@ -77,6 +83,10 @@
   <span class="tag"><span id="dot"></span> <span id="status">connecting…</span></span>
   <span class="tag" id="uptime"></span>
   <span class="tag" style="margin-left:auto">
+    <label for="api" style="color:var(--muted)">backend</label>
+    <input id="api" size="22" placeholder="same origin" style="padding:4px 8px">
+  </span>
+  <span class="tag">
     <label for="sym" style="color:var(--muted)">symbol</label>
     <input id="sym" value="AAPL" size="7" style="padding:4px 8px">
   </span>
@@ -156,8 +166,42 @@ const num = (n) => Number(n).toLocaleString();
 let symbol = "AAPL";
 let alive = false;
 
+// This page is served two ways -- embedded in the server binary, and as a
+// static file on a CDN pointing at a backend somewhere else -- so the API
+// origin cannot be baked in. Resolution order is most-specific-first: a ?api=
+// override (so a link can pin one deployment), then whatever the operator
+// typed into the header field, then the value injected at deploy time, then
+// same origin.
+const kApiBaseKey = "bourse.apiBase";
+
+// Trailing slashes are stripped so `base + "/api/stats"` can never produce a
+// double slash, which some proxies answer with a redirect the fetch drops.
+const normalizeBase = (value) => String(value || "").trim().replace(/\/+$/, "");
+
+function readStoredBase() {
+  // Private-browsing modes throw on localStorage rather than returning null.
+  try { return localStorage.getItem(kApiBaseKey) || ""; } catch (_) { return ""; }
+}
+
+function writeStoredBase(value) {
+  try {
+    if (value) { localStorage.setItem(kApiBaseKey, value); } else { localStorage.removeItem(kApiBaseKey); }
+  } catch (_) { /* nothing to persist to; the in-memory value still applies */ }
+}
+
+function resolveApiBase() {
+  const fromQuery = new URLSearchParams(location.search).get("api");
+  if (fromQuery !== null) {
+    writeStoredBase(normalizeBase(fromQuery));
+    return normalizeBase(fromQuery);
+  }
+  return readStoredBase() || normalizeBase(window.BOURSE_API_BASE);
+}
+
+let apiBase = resolveApiBase();
+
 async function api(path, options) {
-  const response = await fetch(path, options);
+  const response = await fetch(apiBase + path, options);
   const text = await response.text();
   let parsed = text;
   try { parsed = JSON.parse(text); } catch (_) { /* plain text endpoint */ }
@@ -293,6 +337,16 @@ $("scan").onclick = async () => {
 };
 
 $("sym").addEventListener("change", () => { symbol = $("sym").value.trim().toUpperCase() || "AAPL"; refresh(); });
+
+// Emptying the field clears the stored override and falls back to whatever the
+// deploy injected, which is the only way back to the default once one is set.
+$("api").value = apiBase;
+$("api").addEventListener("change", () => {
+  writeStoredBase(normalizeBase($("api").value));
+  apiBase = resolveApiBase();
+  $("api").value = apiBase;
+  refresh();
+});
 
 refresh();
 setInterval(refresh, 1000);

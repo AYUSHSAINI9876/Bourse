@@ -48,7 +48,10 @@ COPY --from=build /src/build/bin/bourse-server /usr/local/bin/bourse-server
 USER bourse
 WORKDIR /home/bourse
 
-EXPOSE 6380
+# 6380 speaks RESP, 8080 serves the REST API and the dashboard. Container
+# platforms that publish a single port want the HTTP one; those that read
+# $PORT override 8080 at run time without a rebuild.
+EXPOSE 6380 8080
 
 # Exec form so bourse-server is PID 1 and receives SIGTERM directly, which is
 # what makes `docker stop` a graceful shutdown rather than a 10-second kill.
