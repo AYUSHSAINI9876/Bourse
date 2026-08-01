@@ -40,9 +40,9 @@
   <!-- L6 dashboard -->
   <rect class="card-done" x="28" y="82" width="884" height="56" rx="8"/>
   <text class="ltag"  x="46"  y="104">L6</text>
-  <text class="lname" x="46"  y="122">dashboard/</text>
-  <text class="item"  x="180" y="108">depth ladder · trade tape · latency histogram · command console · keyspace browser</text>
-  <text class="muted" x="180" y="126">single self-contained HTML page, compiled into the binary — no CDN, no build step</text>
+  <text class="lname" x="46"  y="122">frontend/</text>
+  <text class="item"  x="180" y="108">login gate · depth ladder · trade tape · latency · sparklines · console · SQL · users</text>
+  <text class="muted" x="180" y="126">one self-contained HTML page — compiled into the binary and served by the CDN</text>
   <rect class="badge-done" x="846" y="100" width="50" height="18" rx="9"/>
   <text class="badge-text" x="857" y="113">SHIPPED</text>
 
@@ -95,10 +95,10 @@
   <!-- L2 cache -->
   <rect class="card-done" x="28" y="468" width="884" height="74" rx="8"/>
   <text class="ltag"  x="46"  y="490">L2</text>
-  <text class="lname" x="46"  y="508">cache/</text>
+  <text class="lname" x="46"  y="508">cache/ auth/</text>
   <text class="item"  x="180" y="494">Keyspace: 16 shards · one mutex each · transparent hashing (no alloc per lookup)</text>
   <text class="item"  x="180" y="514">Value = variant&lt;string, int64, list, hash, set&gt; · lazy + active TTL expiry</text>
-  <text class="item"  x="180" y="532">EvictionPolicy → LRU · LFU · Random · NoEviction   (sampled, not exact)</text>
+  <text class="item"  x="180" y="532">EvictionPolicy → LRU · LFU · Random (sampled) · auth: PBKDF2, roles, sessions</text>
   <rect class="badge-done" x="846" y="482" width="50" height="18" rx="9"/>
   <text class="badge-text" x="857" y="495">SHIPPED</text>
 

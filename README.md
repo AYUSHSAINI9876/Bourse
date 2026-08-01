@@ -20,7 +20,7 @@ A real exchange is not one system, it is five stacked on top of each other: a lo
 All five layers are built and tested. You can point `redis-cli` at it, `curl` at it, or open the dashboard in a browser, and all three reach the same command registry.
 
 <p align="center">
-  <img src="docs/img/architecture.svg" alt="Bourse layered architecture: core, storage, cache, exec, match, sql, net, dashboard" width="100%">
+  <img src="docs/img/architecture.svg" alt="Bourse layered architecture: core, storage, cache, auth, exec, match, sql, net, frontend" width="100%">
 </p>
 
 ---
@@ -301,39 +301,39 @@ The unpipelined figures are **client-bound, not server-bound** — in sequential
 
 The comments in this codebase explain *why*, not *what*. A selection:
 
-**Sixteen shards with a plain `std::mutex`, not a `std::shared_mutex`.** Reads are not read-only — every `GET` updates eviction metadata, so a `shared_lock` would be an outright data race. The alternatives were atomic metadata (cost on every access, still torn across two fields) or exclusive locking with enough shards that it stops mattering. → [`keyspace.hpp`](include/bourse/cache/keyspace.hpp)
+**Sixteen shards with a plain `std::mutex`, not a `std::shared_mutex`.** Reads are not read-only — every `GET` updates eviction metadata, so a `shared_lock` would be an outright data race. The alternatives were atomic metadata (cost on every access, still torn across two fields) or exclusive locking with enough shards that it stops mattering. → [`keyspace.hpp`](backend/include/bourse/cache/keyspace.hpp)
 
-**Sampled eviction, not exact LRU.** Exact LRU needs an intrusive list touched on every read — turning every read into a write plus a pointer chase through cold memory. Bourse samples and ranks, which is why `--maxmemory-samples` exists. Random *bucket* probing keeps sampling O(1); `std::advance` from `begin()` would make eviction quadratic. → [`eviction.hpp`](include/bourse/cache/eviction.hpp)
+**Sampled eviction, not exact LRU.** Exact LRU needs an intrusive list touched on every read — turning every read into a write plus a pointer chase through cold memory. Bourse samples and ranks, which is why `--maxmemory-samples` exists. Random *bucket* probing keeps sampling O(1); `std::advance` from `begin()` would make eviction quadratic. → [`eviction.hpp`](backend/include/bourse/cache/eviction.hpp)
 
-**A 64-bit token in the poller, not a pointer.** A pointer registered with the kernel outlives the C++ object if a connection dies between `epoll_wait` returning and dispatch — dereferencing it is a use-after-free. An integer id forces the dispatcher back through the connection table, where a stale token simply misses. → [`poller.hpp`](include/bourse/net/poller.hpp)
+**A 64-bit token in the poller, not a pointer.** A pointer registered with the kernel outlives the C++ object if a connection dies between `epoll_wait` returning and dispatch — dereferencing it is a use-after-free. An integer id forces the dispatcher back through the connection table, where a stale token simply misses. → [`poller.hpp`](backend/include/bourse/net/poller.hpp)
 
-**Commands return `Reply` objects, not bytes.** That one indirection is why RESP, REST and the dashboard cannot drift apart: there is one implementation behind all three, and the test suite inspects results structurally without parsing anything. → [`reply.hpp`](include/bourse/exec/reply.hpp)
+**Commands return `Reply` objects, not bytes.** That one indirection is why RESP, REST and the dashboard cannot drift apart: there is one implementation behind all three, and the test suite inspects results structurally without parsing anything. → [`reply.hpp`](backend/include/bourse/exec/reply.hpp)
 
-**Journalling lives in the registry, not in commands.** One hook after dispatch, gated on `Command::isWrite()`. A new write verb is persisted automatically and both transports are covered by construction. Journalling *after* execution and only on success matters too — logging first would persist commands that were then rejected. → [`command_registry.cpp`](src/exec/command_registry.cpp)
+**Journalling lives in the registry, not in commands.** One hook after dispatch, gated on `Command::isWrite()`. A new write verb is persisted automatically and both transports are covered by construction. Journalling *after* execution and only on success matters too — logging first would persist commands that were then rejected. → [`command_registry.cpp`](backend/src/exec/command_registry.cpp)
 
-**Prices are integer ticks.** `0.1 + 0.2 != 0.3` in binary floating point, so two orders that should cross at the same price compare unequal. There is a test for exactly that. → [`order.hpp`](include/bourse/match/order.hpp)
+**Prices are integer ticks.** `0.1 + 0.2 != 0.3` in binary floating point, so two orders that should cross at the same price compare unequal. There is a test for exactly that. → [`order.hpp`](backend/include/bourse/match/order.hpp)
 
-**Trades print at the resting order's price.** Price improvement accrues to the side that was patient enough to sit on the book — the incentive every venue wants, and a classic thing to get backwards. → [`order_book.cpp`](src/match/order_book.cpp)
+**Trades print at the resting order's price.** Price improvement accrues to the side that was patient enough to sit on the book — the incentive every venue wants, and a classic thing to get backwards. → [`order_book.cpp`](backend/src/match/order_book.cpp)
 
-**Fill-or-kill checks liquidity before consuming any.** A partial fill it then had to unwind would already have emitted trades that market-data consumers saw. → [`order_book.cpp`](src/match/order_book.cpp)
+**Fill-or-kill checks liquidity before consuming any.** A partial fill it then had to unwind would already have emitted trades that market-data consumers saw. → [`order_book.cpp`](backend/src/match/order_book.cpp)
 
-**Visitor over the SQL AST.** The node set is closed and stable; the *operations* keep growing — evaluate, print for EXPLAIN, collect referenced columns, type-check. Virtual methods on every node would mean editing four classes per operation. There are two visitors in the tree already, and adding the second required changing no node. → [`ast.hpp`](include/bourse/sql/ast.hpp)
+**Visitor over the SQL AST.** The node set is closed and stable; the *operations* keep growing — evaluate, print for EXPLAIN, collect referenced columns, type-check. Virtual methods on every node would mean editing four classes per operation. There are two visitors in the tree already, and adding the second required changing no node. → [`ast.hpp`](backend/include/bourse/sql/ast.hpp)
 
-**A volcano-model executor.** Uniform `open`/`next`/`close` means `LIMIT 10` over a million rows stops the scan after ten without any operator knowing about any other. The cost is a virtual call per row per operator — which is exactly why real engines moved to vectorised execution, and worth being able to say out loud. → [`engine.hpp`](include/bourse/sql/engine.hpp)
+**A volcano-model executor.** Uniform `open`/`next`/`close` means `LIMIT 10` over a million rows stops the scan after ten without any operator knowing about any other. The cost is a virtual call per row per operator — which is exactly why real engines moved to vectorised execution, and worth being able to say out loud. → [`engine.hpp`](backend/include/bourse/sql/engine.hpp)
 
-**NULL is a distinct alternative, not a sentinel.** SQL's three-valued logic is not expressible in-band: `NULL = NULL` is NULL, and `WHERE x = NULL` matches nothing. Making it a type forces every comparison site to decide. → [`ast.cpp`](src/sql/ast.cpp)
+**NULL is a distinct alternative, not a sentinel.** SQL's three-valued logic is not expressible in-band: `NULL = NULL` is NULL, and `WHERE x = NULL` matches nothing. Making it a type forces every comparison site to decide. → [`ast.cpp`](backend/src/sql/ast.cpp)
 
-**A B+ tree, not a hash index.** A hash index answers point lookups in O(1) and range scans not at all. `WHERE ts BETWEEN a AND b`, `ORDER BY price` and "the next 50 rows" are all range queries, and they are most of what a trading system asks. Values live only in leaves so internal nodes fan out ~62 ways — a test asserts 10,000 keys produce a tree at most 4 levels deep. Leaves are singly linked so a range scan never walks back up. → [`bplus_tree.hpp`](include/bourse/storage/bplus_tree.hpp)
+**A B+ tree, not a hash index.** A hash index answers point lookups in O(1) and range scans not at all. `WHERE ts BETWEEN a AND b`, `ORDER BY price` and "the next 50 rows" are all range queries, and they are most of what a trading system asks. Values live only in leaves so internal nodes fan out ~62 ways — a test asserts 10,000 keys produce a tree at most 4 levels deep. Leaves are singly linked so a range scan never walks back up. → [`bplus_tree.hpp`](backend/include/bourse/storage/bplus_tree.hpp)
 
-**Pinning is what makes the buffer pool safe.** Eviction only ever considers unpinned frames; if all are pinned the pool reports exhaustion rather than pulling a page from under a caller. Forgetting to unpin therefore leaks a frame instead of causing a use-after-free — the failure mode you want. A `PageGuard` makes every early return in the tree code safe. → [`buffer_pool.hpp`](include/bourse/storage/buffer_pool.hpp)
+**Pinning is what makes the buffer pool safe.** Eviction only ever considers unpinned frames; if all are pinned the pool reports exhaustion rather than pulling a page from under a caller. Forgetting to unpin therefore leaks a frame instead of causing a use-after-free — the failure mode you want. A `PageGuard` makes every early return in the tree code safe. → [`buffer_pool.hpp`](backend/include/bourse/storage/buffer_pool.hpp)
 
-**CRC-32 on every WAL record.** Not paranoia — it is the only way to tell a torn tail from a crash (truncate, carry on) from corruption mid-file (refuse to start). Without it, replay would feed half a command into the keyspace. → [`wal.cpp`](src/storage/wal.cpp)
+**CRC-32 on every WAL record.** Not paranoia — it is the only way to tell a torn tail from a crash (truncate, carry on) from corruption mid-file (refuse to start). Without it, replay would feed half a command into the keyspace. → [`wal.cpp`](backend/src/storage/wal.cpp)
 
-**Snapshots are written to a temp file and renamed.** A crash mid-write leaves the previous good snapshot or a stray `.tmp` — never a truncated image that `load()` would accept as complete. → [`snapshot.cpp`](src/storage/snapshot.cpp)
+**Snapshots are written to a temp file and renamed.** A crash mid-write leaves the previous good snapshot or a stray `.tmp` — never a truncated image that `load()` would accept as complete. → [`snapshot.cpp`](backend/src/storage/snapshot.cpp)
 
-**Cache-line separation in the SPSC ring.** Producer writes `write_`, consumer writes `read_`; sharing a line means every push invalidates the consumer's copy. Each side also caches the *other* cursor so in steady state it never touches the other's line. → [`spsc_ring.hpp`](include/bourse/core/spsc_ring.hpp)
+**Cache-line separation in the SPSC ring.** Producer writes `write_`, consumer writes `read_`; sharing a line means every push invalidates the consumer's copy. Each side also caches the *other* cursor so in steady state it never touches the other's line. → [`spsc_ring.hpp`](backend/include/bourse/core/spsc_ring.hpp)
 
-**Inline writes before buffering.** `Connection::send` tries the socket first; buffering and waiting for `EPOLLOUT` would add a full loop iteration to every reply. → [`connection.cpp`](src/net/connection.cpp)
+**Inline writes before buffering.** `Connection::send` tries the socket first; buffering and waiting for `EPOLLOUT` would add a full loop iteration to every reply. → [`connection.cpp`](backend/src/net/connection.cpp)
 
 ### Bugs the tests actually caught
 
