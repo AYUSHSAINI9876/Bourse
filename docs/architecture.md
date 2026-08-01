@@ -148,9 +148,25 @@ The cost is one virtual call per row per operator, which is exactly why producti
 
 ---
 
+## Authentication
+
+**One authorization decision, shared by both protocols.** The role check lives in `CommandRegistry::dispatch`, next to the journal hook and for the same reason: a verb added tomorrow is covered by default, and RESP and REST cannot drift apart on what a role may do, because there is only one implementation behind both. A handler that forgot its own check would be a silent hole — there is no handler-level check to forget.
+
+**The required role is derived, not declared.** `requiredRole()` is computed from `isNoAuth()`, `isAdmin()` and `isWrite()`, so the default is the safe one and a command opts *down* rather than having to remember to opt in. A test walks the registry and fails if anything reaches `anonymous` outside an explicit four-name allowlist.
+
+**Identity lives where the protocol puts it.** RESP is a session protocol: credentials are presented once with `AUTH` and apply to every later command, so the `Principal` belongs to the `Connection` — and needs no lock, because a connection is pinned to one event loop for its entire life. HTTP is stateless, so every request carries its own credentials and gets its own `Principal` on the `HttpRequest`.
+
+**Sessions are not stored in the keyspace.** The keyspace is right there and has TTL support, but under `--maxmemory` with an `allkeys-*` policy it evicts whatever it likes — so sessions would be dropped at random under load, and the harder the server is hit, the more often users would be logged out. Session storage needs a different eviction rule from cache storage, so it gets its own store with its own sweep.
+
+**Users are deliberately not journalled.** `USER` answers `isWrite()` as `false` even though it mutates state, because replaying `USER ADD alice hunter2` from the write-ahead log would put a plaintext password in a file on disk. Not persisting users is the lesser problem; persisting the *hash* is the correct fix and is what a future version should do.
+
+Full model and its limitations: [security.md](security.md).
+
 ## HTTP layer
 
-**One codec, one router, an explicit middleware chain.** `Middleware` receives the rest of the chain as a `next` continuation rather than holding a `next_` pointer, so the same middleware can be registered on several chains. Not calling `next()` short-circuits — which is how the CORS middleware answers a pre-flight without any handler running, and how auth would reject a request.
+**One codec, one router, an explicit middleware chain.** `Middleware` receives the rest of the chain as a `next` continuation rather than holding a `next_` pointer, so the same middleware can be registered on several chains. Not calling `next()` short-circuits — which is how the CORS middleware answers a pre-flight without any handler running, and how the bearer-token middleware rejects an unauthenticated request before any handler sees it.
+
+Middleware takes a **mutable** `HttpRequest` while a handler takes a `const` one, and that distinction is the point: middleware exists to *annotate* a request — resolving a bearer token into a `Principal` — before anything acts on it. Registration order matters and is asserted by the deployment smoke test: CORS runs before auth, so a rejected request still carries the headers a browser needs in order to read the 401 rather than reporting an opaque network error.
 
 **404 and 405 are distinguished.** The router remembers when a path matched under a different verb, because telling a client "the URL is right, the method is wrong" is genuinely more useful than a blanket 404.
 

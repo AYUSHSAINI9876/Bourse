@@ -3,7 +3,7 @@
 Reproduce everything here with:
 
 ```bash
-bash scripts/benchmark.sh [port] [requests] [clients]
+bash backend/scripts/benchmark.sh [port] [requests] [clients]
 ```
 
 ---
@@ -105,7 +105,7 @@ Two properties matter more than the raw number and are asserted by tests rather 
 Sanitizer builds are 2–5× slower and are not comparable to the numbers above. They exist to prove correctness, not speed:
 
 ```bash
-bash scripts/check-sanitizers.sh
+bash backend/scripts/check-sanitizers.sh
 ```
 
 Current status: **ASan + UBSan clean, TSan clean**, 235/235 tests under both.

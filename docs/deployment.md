@@ -30,16 +30,27 @@ So the deployment is split, which is the normal shape for this kind of system:
      |
      |  HTTPS
      v
-  Vercel  ──────────►  dashboard/index.html   (static, global CDN, free)
+  Vercel  ──────────►  frontend/index.html    (static, global CDN, free)
      |
      |  fetch() cross-origin, CORS-approved
      v
   Render  ──────────►  bourse-server in Docker (the actual C++ server, free)
 ```
 
-One file, `dashboard/index.html`, is used both ways: the server binary embeds
-it for local use, and `web/build.sh` stamps the backend URL into a copy of it
+One file, `frontend/index.html`, is used both ways: the server binary embeds it
+at build time, and `frontend/build.sh` stamps the backend URL into a copy of it
 for the CDN. There is no second copy to keep in sync.
+
+The repository has exactly two source directories:
+
+```
+Bourse/
+├── frontend/          index.html, build.sh, vercel.json   -> Vercel
+├── backend/           C++20 server, tests, scripts        -> Render
+├── docs/              architecture, benchmarks, security, this file
+├── render.yaml        must sit at the root; Render only looks there
+└── docker-compose.yml
+```
 
 ---
 
@@ -123,6 +134,11 @@ Leave **Docker Command** empty to use `render.yaml`'s, or paste:
 /usr/local/bin/bourse-server --host 0.0.0.0 --maxmemory 200mb --maxmemory-policy allkeys-lru --appendonly yes --dir /home/bourse/data --log-level info
 ```
 
+**Docker Build Context Directory** must be `.` (the repository root) and
+**Dockerfile Path** `./backend/Dockerfile`. The server embeds
+`frontend/index.html`, so a context of `backend/` alone fails at the
+asset-embed step. `render.yaml` already sets both.
+
 Note there is no `--http-port`. Render assigns the public port at run time and
 passes it in `$PORT`; `Config::fromArgs` reads that before parsing argv, so the
 same image runs anywhere without a rebuild.
@@ -165,6 +181,64 @@ you a second, frontend-shaped link.
 
 **Copy that URL.** The next part needs it.
 
+### 1.5 Turn on authentication
+
+Everything above is deployed wide open: anyone who finds the URL can run
+`FLUSHALL`. For anything public, turn on auth. In Render, **Environment** →
+**Add Environment Variable**:
+
+| Key | Value |
+|---|---|
+| `BOURSE_AUTH` | `yes` |
+| `BOURSE_ADMIN_USER` | `admin` |
+| `BOURSE_ADMIN_PASSWORD` | a long random string you generate |
+
+Environment variables rather than flags on purpose: `ps` shows a process's
+command line to every user on the box, and Render stores env vars as secrets.
+
+If you set `BOURSE_AUTH=yes` and **omit** the password, the server generates one
+and prints it to the log exactly once at startup:
+
+```
+[WARN ]   Generated administrator credentials -- shown once, not stored:
+[WARN ]     username: admin
+[WARN ]     password: 8f3a2c1e9b7d4a06
+```
+
+Copy it from the Render log immediately — it is never written anywhere else.
+That is deliberate: there is no default password committed anywhere in this
+repository, because a demo server with a default password is a demo server
+someone else owns.
+
+Save, let it redeploy, then verify:
+
+```bash
+curl -i https://bourse.onrender.com/api/stats
+# HTTP/1.1 401 Unauthorized
+# WWW-Authenticate: Bearer realm="bourse"
+
+curl -X POST https://bourse.onrender.com/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"<yours>"}'
+# {"token":"…","username":"admin","role":"admin","expires_at_ms":…}
+```
+
+`/health` and `/` stay public so the platform's health check keeps working and
+the dashboard can load its login screen.
+
+Roles are `viewer` (read-only), `trader` (+ writes and orders) and `admin`
+(+ `FLUSHALL`, `CONFIG`, user management). Add a read-only account for anyone
+you share the link with:
+
+```bash
+curl -X POST https://bourse.onrender.com/api/auth/users \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"username":"guest","password":"a-long-guest-password","role":"viewer"}'
+```
+
+Full model, including what it deliberately does *not* protect:
+[docs/security.md](security.md).
+
 ---
 
 ## Part 2 — Deploy the dashboard on Vercel
@@ -186,9 +260,13 @@ The one thing you must set is the environment variable. Expand
 |---|---|
 | `BOURSE_API_BASE` | `https://bourse.onrender.com` |
 
+Also set **Root Directory** to `frontend` in the project's settings. That is
+what makes `frontend/vercel.json` the configuration Vercel reads, and it keeps
+the whole C++ tree out of the build.
+
 Use your real Render URL. **No trailing slash**, and it must be `https://` — a
 page served over HTTPS cannot call an HTTP backend, browsers block it as mixed
-content. `web/build.sh` refuses both mistakes rather than shipping a page that
+content. `frontend/build.sh` refuses both mistakes rather than shipping a page that
 silently fails.
 
 ### 2.3 Deploy
@@ -197,8 +275,8 @@ Click **Deploy**. This build takes seconds — it copies one HTML file and
 rewrites one line. Look for:
 
 ```
-Running "bash web/build.sh"
-build: wrote /vercel/path0/web/dist/index.html -> backend https://bourse.onrender.com
+Running "bash build.sh"
+build: wrote /vercel/path0/frontend/dist/index.html -> backend https://bourse.onrender.com
 Build Completed
 ```
 
@@ -219,7 +297,7 @@ If it says **server unreachable**, see [Troubleshooting](#troubleshooting).
 
 ## How the frontend finds the backend
 
-`dashboard/index.html` resolves its API origin at load time, most specific
+`frontend/index.html` resolves its API origin at load time, most specific
 source first:
 
 1. **`?api=` in the URL** — `https://bourse.vercel.app/?api=https://other.example`.
@@ -227,7 +305,7 @@ source first:
    redeploy. The value is remembered.
 2. **The header "backend" field** — type a URL, press Enter. Stored in
    `localStorage`. Clearing the field reverts to the deploy-time default.
-3. **`window.BOURSE_API_BASE`** — the line `web/build.sh` rewrites from
+3. **`window.BOURSE_API_BASE`** — the line `frontend/build.sh` rewrites from
    `BOURSE_API_BASE` at build time. This is the normal path.
 4. **Same origin** — the fallback, and what the binary-embedded copy uses.
 
@@ -235,9 +313,9 @@ Because of (1) and (2), a Vercel deploy with the environment variable missing is
 recoverable without a rebuild: type the backend URL into the header field.
 
 Cross-origin calls work because the server installs a CORS middleware
-([`src/net/router.cpp`](../src/net/router.cpp)) that answers `OPTIONS`
+([`backend/src/net/router.cpp`](../backend/src/net/router.cpp)) that answers `OPTIONS`
 pre-flights with `204` and attaches `Access-Control-Allow-Origin: *` to every
-response. `scripts/smoke-deploy.sh` asserts this against a running server,
+response. `backend/scripts/smoke-deploy.sh` asserts this against a running server,
 because in a browser a missing CORS header shows up only as an empty page and a
 console message.
 
@@ -248,7 +326,7 @@ console message.
 You do not have to deploy to find out whether the split works:
 
 ```bash
-bash scripts/smoke-deploy.sh
+bash backend/scripts/smoke-deploy.sh
 ```
 
 This starts the server, builds the static bundle, serves it from a *different*
@@ -259,9 +337,9 @@ same-origin. 16 assertions, all of which must pass.
 To look at it yourself:
 
 ```bash
-./build/bin/bourse-server --http-port 8080 &
-BOURSE_API_BASE=http://localhost:8080 bash web/build.sh
-python3 -m http.server -d web/dist 3000
+./backend/build/bin/bourse-server --http-port 8080 &
+BOURSE_API_BASE=http://localhost:8080 bash frontend/build.sh
+python3 -m http.server -d frontend/dist 3000
 # open http://localhost:3000 -- a dashboard on :3000 driving a server on :8080
 ```
 
@@ -286,7 +364,7 @@ cold sees "server unreachable" until it boots. Mitigations:
 the container filesystem, so recovery genuinely works across a process restart —
 but not across the instance being replaced. Add a Render disk mounted at
 `/home/bourse/data` on a paid plan to make it durable. This does not affect
-`scripts/smoke-persistence.sh`, which tests recovery properly by `SIGKILL`ing a
+`backend/scripts/smoke-persistence.sh`, which tests recovery properly by `SIGKILL`ing a
 local server.
 
 **Only the HTTP port is public.** Render publishes one port per web service, so
@@ -313,7 +391,7 @@ a shared-cpu-1x/256MB machine.
 ```bash
 curl -L https://fly.io/install.sh | sh
 fly auth login
-fly launch --dockerfile Dockerfile --no-deploy
+fly launch --dockerfile backend/Dockerfile --no-deploy
 ```
 
 Then in the generated `fly.toml`:
@@ -376,10 +454,10 @@ Working as intended: the value is interpolated into a JavaScript string, so only
 `https://host[:port][/path]` is accepted. Check for a stray quote, space, or a
 copied `"` from the docs.
 
-**Render build fails at `Embedding dashboard/index.html`.**
-`dashboard/` was not copied into the image. The `COPY dashboard/ ./dashboard/`
-line in the Dockerfile is required — the asset embed step is part of the build,
-not an optional extra.
+**Render build fails at `Embedding frontend/index.html`.**
+The build context was set to `backend/` instead of the repository root. The
+server embeds the dashboard, so the context has to span both halves:
+`dockerContext: .` and `dockerfilePath: ./backend/Dockerfile`.
 
 **Render build times out or OOMs.**
 The free build container compiles the whole project. If it runs out of memory,

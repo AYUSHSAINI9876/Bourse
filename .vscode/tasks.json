@@ -3,7 +3,7 @@
   "options": {
     // Every task runs bash inside WSL. Running them from a Windows shell
     // would pick up the broken MinGW toolchain instead of g++ 15.
-    "cwd": "${workspaceFolder}"
+    "cwd": "${workspaceFolder}/backend"
   },
   "presentation": { "clear": true, "panel": "dedicated" },
   "tasks": [
@@ -53,9 +53,21 @@
       "problemMatcher": []
     },
     {
-      "label": "Test: everything (unit + 3 smoke suites)",
+      "label": "Test: everything (unit + 4 smoke suites + crypto)",
       "type": "shell",
       "command": "bash scripts/verify-all.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Test: split deployment and auth",
+      "type": "shell",
+      "command": "bash scripts/smoke-deploy.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Test: crypto vs. Python hashlib",
+      "type": "shell",
+      "command": "bash scripts/verify-crypto.sh",
       "problemMatcher": []
     },
     {

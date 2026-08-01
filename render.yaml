@@ -1,5 +1,9 @@
 # Render blueprint -- the backend half of the deployment.
 #
+# This file has to sit at the repository root: Render only looks for
+# render.yaml there, the same way GitHub only looks in .github/. Everything it
+# points at lives under backend/.
+#
 # Vercel runs serverless functions with a request-scoped lifetime, so it cannot
 # host this server: Bourse is a long-lived multi-threaded epoll reactor that
 # holds TCP connections open and keeps the keyspace, order books and buffer
@@ -15,7 +19,10 @@ services:
     # No `repo:` on purpose -- omitting it means "the repository this blueprint
     # was created from", so nothing here has to be edited after forking.
     branch: main
-    dockerfilePath: ./Dockerfile
+    # Both paths are relative to the repository root. The context deliberately
+    # spans both halves: the server embeds frontend/index.html, so a context of
+    # backend/ alone would fail at the asset-embed step.
+    dockerfilePath: ./backend/Dockerfile
     dockerContext: .
     plan: free
     # Free instances are available in every Render region; Singapore is the

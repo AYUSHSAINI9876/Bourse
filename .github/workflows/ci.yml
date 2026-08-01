@@ -14,6 +14,11 @@ jobs:
   build-and-test:
     name: ${{ matrix.compiler }} / ${{ matrix.build_type }}
     runs-on: ubuntu-latest
+    # The C++ project lives in backend/; frontend/ is a static page with no
+    # build of its own beyond the URL stamp that smoke-deploy.sh exercises.
+    defaults:
+      run:
+        working-directory: backend
     strategy:
       fail-fast: false
       matrix:
@@ -63,12 +68,26 @@ jobs:
 
       # Guards the split deployment: a dropped CORS header or a regression in
       # $PORT handling breaks the hosted demo while every other test stays green.
-      - name: Smoke — split deployment
+      # Also covers the auth flow over both protocols.
+      - name: Smoke — split deployment and auth
         run: bash scripts/smoke-deploy.sh
+
+      # The crypto is hand-written, so "matches the published vectors" is not
+      # enough on its own -- this diffs it against Python's hashlib.
+      - name: Crypto vs. Python hashlib
+        run: bash scripts/verify-crypto.sh
+
+      # The dashboard has no build step or type checker, so a typo in an
+      # element id would fail silently in a browser and nowhere else.
+      - name: Dashboard static checks
+        run: bash scripts/check-dashboard.sh
 
   sanitizers:
     name: ${{ matrix.sanitizer }}
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     strategy:
       fail-fast: false
       matrix:
@@ -101,6 +120,9 @@ jobs:
   static-analysis:
     name: format and tidy
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
 
@@ -126,7 +148,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build image
-        run: docker build -t bourse:ci .
+        run: docker build -f backend/Dockerfile -t bourse:ci .
       - name: Smoke the image
         run: |
           docker run -d --name bourse-ci -p 6380:6380 bourse:ci

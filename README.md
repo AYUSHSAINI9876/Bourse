@@ -5,7 +5,7 @@
 <p>
   <img alt="C++20" src="https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white">
   <img alt="CMake" src="https://img.shields.io/badge/build-CMake%20%2B%20Ninja-064F8C?logo=cmake&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-235%20passing-2ea043">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-286%20passing-2ea043">
   <img alt="Sanitizers" src="https://img.shields.io/badge/ASan%20%C2%B7%20UBSan%20%C2%B7%20TSan-clean-2ea043">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Linux%20%C2%B7%20WSL%20%C2%B7%20Docker-333">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
@@ -28,14 +28,16 @@ All five layers are built and tested. You can point `redis-cli` at it, `curl` at
 ## The 60-second demo
 
 ```bash
-bash scripts/build.sh
-bash scripts/demo.sh                 # guided tour of every layer, then leaves the server up
+bash backend/scripts/build.sh
+bash backend/scripts/demo.sh         # guided tour of every layer, then leaves the server up
 ```
+
+Every script resolves its own location, so all of these work from the repository root.
 
 Or start it yourself:
 
 ```bash
-./build/bin/bourse-server            # RESP on 6380, HTTP + dashboard on 8080
+./backend/build/bin/bourse-server            # RESP on 6380, HTTP + dashboard on 8080
 ```
 
 **It is a Redis server.** Stock `redis-cli`, nothing custom:
@@ -90,14 +92,37 @@ tree.validate();                                                 // sorted, bala
 **It survives a crash.** `--appendonly yes` turns on the WAL:
 
 ```bash
-./build/bin/bourse-server --appendonly yes --dir ./data &
+./backend/build/bin/bourse-server --appendonly yes --dir ./data &
 redis-cli -p 6380 SET survivor "still here"
 kill -9 %1                                   # no clean shutdown, no flush
-./build/bin/bourse-server --appendonly yes --dir ./data &
+./backend/build/bin/bourse-server --appendonly yes --dir ./data &
 redis-cli -p 6380 GET survivor               # "still here"
 ```
 
-**It has a live dashboard.** Open <http://localhost:8080> — depth ladder, trade tape, latency histogram, command console, keyspace browser. One self-contained HTML page compiled into the binary.
+**It authenticates.** Off by default so a local run needs nothing; one flag turns it on, and the *same* role check then applies over RESP and over HTTP, because both go through one decision in the command registry:
+
+```console
+$ ./backend/build/bin/bourse-server --auth yes --admin-user admin --admin-password 'a-strong-one'
+$ redis-cli -p 6380
+127.0.0.1:6380> PING                       # pre-auth verbs still work
+PONG
+127.0.0.1:6380> GET anything
+(error) NOAUTH Authentication required.
+127.0.0.1:6380> AUTH admin a-strong-one
+OK
+127.0.0.1:6380> USER ADD reader a-reader-password viewer
+OK
+127.0.0.1:6380> AUTH reader a-reader-password
+OK
+127.0.0.1:6380> GET anything               # viewers read
+(nil)
+127.0.0.1:6380> SET k v                    # viewers do not write
+(error) NOPERM this user has no permissions to run the 'SET' command
+```
+
+Passwords are PBKDF2-HMAC-SHA256 with a per-credential salt; session tokens are 256 bits of `/dev/urandom` and only their SHA-256 is stored. SHA-256, HMAC and PBKDF2 are implemented in this repo and **cross-checked against Python's `hashlib` over 850 randomised inputs** — see [docs/security.md](docs/security.md).
+
+**It has a live dashboard.** Open <http://localhost:8080> — depth ladder, trade tape, latency histogram, live sparklines, command console with history, a SQL workbench, keyspace browser, and user administration. One self-contained HTML page compiled into the binary, and the same file Vercel serves.
 
 ---
 
@@ -108,11 +133,12 @@ redis-cli -p 6380 GET survivor               # "still here"
 | **L0** `core/` | RAII `File`/`Socket`, `ByteBuffer`, bounded `ThreadPool`, lock-free `SpscRing`, `ObjectPool`, `Arena`, async `Logger`, HDR-style `Histogram` | ✅ |
 | **L1** `storage/` | `WriteAheadLog` with CRC-32 framing, torn-tail recovery, 3 fsync policies; atomic checksummed `Snapshot`; `DiskManager` + pinning `BufferPool` + on-disk `BPlusTree` | ✅ |
 | **L2** `cache/` | 16-shard `Keyspace`, `Value` variant, lazy + active TTL expiry, sampled LRU/LFU/Random/NoEviction | ✅ |
-| **L3a** `exec/` | `Command` interface, dispatch registry, 57 verbs, protocol-independent `Reply`, `PubSub`, journal hook | ✅ |
+| **L2b** `auth/` | SHA-256, HMAC-SHA256 and PBKDF2 implemented from scratch and cross-checked against Python hashlib; salted password hashing, revocable hashed-token sessions, four ordered roles, per-account and per-address login throttling | ✅ |
+| **L3a** `exec/` | `Command` interface, dispatch registry, 60 verbs, protocol-independent `Reply`, `PubSub`, journal hook | ✅ |
 | **L3b** `sql/` | Lexer → recursive-descent parser → AST → **Visitor** → volcano iterators | ✅ |
 | **L4** `match/` | Order book, price-time priority, LIMIT/MARKET/IOC/FOK, amend, Observer market data | ✅ |
 | **L5** `net/` | `Poller` (epoll + poll), `EventLoop`, acceptor + N reactors, `RespCodec`, `HttpCodec`, `Router`, middleware | ✅ |
-| **L6** `dashboard/` | Depth ladder, trade tape, latency bars, command console, keyspace browser | ✅ |
+| **L6** `frontend/` | Login gate, depth ladder, trade tape, latency histogram, live sparklines, command console with history, SQL workbench, keyspace browser, user administration | ✅ |
 | — | Wiring the B+ tree in behind the SQL row store (the tree is built and tested; the executor still reads from memory) | 🚧 |
 | — | WebSocket streaming (the dashboard polls once a second instead) | 🚧 |
 
@@ -125,8 +151,8 @@ redis-cli -p 6380 GET survivor               # "still here"
 Linux, or Windows with WSL2. One command provisions everything:
 
 ```bash
-wsl -d Ubuntu --user root -- bash scripts/setup-wsl.sh    # from Windows
-sudo bash scripts/setup-wsl.sh                            # on native Linux
+wsl -d Ubuntu --user root -- bash backend/scripts/setup-wsl.sh    # from Windows
+sudo bash backend/scripts/setup-wsl.sh                            # on native Linux
 ```
 
 Installs `g++`, `cmake`, `ninja`, `libgtest-dev`, `redis-tools` and `curl`.
@@ -152,23 +178,23 @@ up the rest:
 | `Ctrl+Shift+P` → *Run Task* | test suite, smoke suites, sanitizers, benchmark, demo |
 | `F5` | debug the tests or the server under gdb, with breakpoints |
 
-IntelliSense reads `build/compile_commands.json`, so it uses the real compiler
+IntelliSense reads `backend/build/compile_commands.json`, so it uses the real compiler
 flags rather than guessing — run a build once and go-to-definition works
 across the whole tree.
 
 ### Build, run, test
 
 ```bash
-bash scripts/build.sh                    # RelWithDebInfo + tests
-./build/bin/bourse-server                # start it
-ctest --test-dir build --output-on-failure
+bash backend/scripts/build.sh                    # RelWithDebInfo + tests
+./backend/build/bin/bourse-server                # start it
+ctest --test-dir backend/build --output-on-failure
 ```
 
 ```
-2026-07-30 09:14:02.118 [INFO ] command registry initialised with 57 verbs
+2026-07-30 09:14:02.118 [INFO ] command registry initialised with 60 verbs
 2026-07-30 09:14:02.119 [INFO ] bourse-resp listening on 0.0.0.0:6380 (poller=epoll, io_threads=4)
 2026-07-30 09:14:02.119 [INFO ] RESP endpoint ready on port 6380 -- try: redis-cli -p 6380 PING
-2026-07-30 09:14:02.121 [INFO ] HTTP endpoint ready on port 8080 -- dashboard at http://localhost:8080/  (16 routes)
+2026-07-30 09:14:02.121 [INFO ] HTTP endpoint ready on port 8080 -- dashboard at http://localhost:8080/  (22 routes)
 ```
 
 ### Docker
@@ -207,20 +233,21 @@ Two-stage build: no compiler in the runtime image, non-root user, ~80 MB.
 Four independent layers of verification. One command runs them all:
 
 ```bash
-bash scripts/verify-all.sh
+bash backend/scripts/verify-all.sh
 ```
 
 Or individually:
 
 | What | Command | Result |
 |---|---|---|
-| Unit + integration | `./build/bin/bourse_tests` | **235 tests, 43 suites** |
-| KV over real `redis-cli` | `bash scripts/smoke-test.sh` | **68 assertions** |
-| HTTP + exchange | `bash scripts/smoke-exchange.sh` | **42 assertions** |
-| Crash recovery | `bash scripts/smoke-persistence.sh` | **27 assertions** |
-| Split deployment (CORS, `$PORT`) | `bash scripts/smoke-deploy.sh` | **16 assertions** |
-| ASan + UBSan + TSan | `bash scripts/check-sanitizers.sh` | **clean** |
-| Throughput + latency | `bash scripts/benchmark.sh` | see below |
+| Unit + integration | `./backend/build/bin/bourse_tests` | **286 tests, 52 suites** |
+| KV over real `redis-cli` | `bash backend/scripts/smoke-test.sh` | **68 assertions** |
+| HTTP + exchange | `bash backend/scripts/smoke-exchange.sh` | **42 assertions** |
+| Crash recovery | `bash backend/scripts/smoke-persistence.sh` | **27 assertions** |
+| Split deployment, CORS, `$PORT`, auth | `bash backend/scripts/smoke-deploy.sh` | **42 assertions** |
+| Crypto vs. Python hashlib | `bash backend/scripts/verify-crypto.sh` | **850 digests** |
+| ASan + UBSan + TSan | `bash backend/scripts/check-sanitizers.sh` | **clean** |
+| Throughput + latency | `bash backend/scripts/benchmark.sh` | see below |
 
 The tests are not decorative. A representative sample of what they pin down:
 
@@ -238,6 +265,11 @@ The tests are not decorative. A representative sample of what they pin down:
 - **`Keyspace.ConcurrentIncrementsLoseNothing`** — 8 threads × 2000 increments must produce exactly the arithmetic total.
 - **`RouterTest.MiddlewareCanShortCircuit`** — a middleware that does not call `next()` must stop the chain before the handler.
 - **`ConfigEnvironmentTest.MalformedPortIsAnErrorRatherThanASilentFallback`** — a bad `$PORT` must stop the process. Falling back to the default would start a server the platform never routes to: healthy logs, every request timing out.
+- **`AuthEnforcementTest.EveryRegisteredCommandHasADefensibleRequiredRole`** — walks all 60 verbs and fails if any reaches `anonymous` outside an explicit four-name allowlist. Adding a command that skips the permission check breaks the build rather than opening a hole nobody notices.
+- **`AuthServiceTest.RejectsTheWrongPasswordAndUnknownUsersIdentically`** — the two error strings must be byte-equal, and a decoy hash makes the two paths cost the same. A distinguishable answer enumerates the user list from outside.
+- **`AuthServiceTest.ChangingAPasswordRevokesLiveSessions`** and **`DeletingAUserRevokesLiveSessions`** — the reason people change a password is that someone else has it; leaving their session alive defeats the point.
+- **`Sha256Test.HandlesTheLengthPaddingBoundaries`** — messages of 55, 56, 63, 64 and 65 bytes hit every padding branch. Getting this wrong yields a hash that is correct for *most* inputs, which is the worst failure mode available.
+- **`JsonFieldTest.OnlyMatchesTopLevelKeys`** — `{"profile":{"password":"nested"},"password":"real"}` must read `real`. This parser handles credentials; a nested key shadowing the real one is how a value gets smuggled past validation.
 
 ---
 
@@ -321,7 +353,7 @@ The comments in this codebase explain *why*, not *what*. A selection:
 
 ---
 
-## Commands (57)
+## Commands (60)
 
 | Group | Commands |
 |---|---|
@@ -336,10 +368,11 @@ The comments in this codebase explain *why*, not *what*. A selection:
 | **Exchange** | `ORDER`, `CANCEL`, `AMEND`, `BOOK`, `TRADES`, `SYMBOLS`, `EXCHANGE` |
 | **SQL** | `SQL`, `EXPLAIN`, `TABLES`, `DESCRIBE` |
 | **Server** | `PING`, `ECHO`, `INFO`, `DBSIZE`, `FLUSHALL`, `COMMAND`, `CONFIG`, `QUIT` |
+| **Auth** | `AUTH`, `WHOAMI`, `USER` (`LIST`/`ADD`/`PASSWD`/`ROLE`/`DEL`) |
 
 Every execution is republished to `trades:<SYMBOL>`, so `SUBSCRIBE trades:AAPL` in one terminal shows fills produced by orders typed into another.
 
-## HTTP endpoints (16)
+## HTTP endpoints (22)
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -357,6 +390,11 @@ Every execution is republished to `trades:<SYMBOL>`, so `SUBSCRIBE trades:AAPL` 
 | `GET` | `/api/symbols` | traded symbols |
 | `POST` | `/api/orders` | submit an order |
 | `DELETE` | `/api/orders/:symbol/:id` | cancel |
+| `POST` | `/api/auth/login` | exchange credentials for a session token |
+| `POST` | `/api/auth/logout` | revoke the presented token |
+| `GET` | `/api/auth/me` | current identity and role |
+| `GET`/`POST` | `/api/auth/users` | list / create users (admin) |
+| `DELETE` | `/api/auth/users/:username` | remove a user (admin) |
 
 ---
 
@@ -364,29 +402,39 @@ Every execution is republished to `trades:<SYMBOL>`, so `SUBSCRIBE trades:AAPL` 
 
 ```
 Bourse/
-├── include/bourse/{core,storage,cache,exec,sql,match,net,server}/
-├── src/                     implementations, mirroring include/
-├── apps/bourse_server/      the executable
-├── tests/                   12 GoogleTest files, 235 tests
-├── dashboard/index.html     embedded at build time by cmake/EmbedAsset.cmake
-├── web/build.sh             stamps the backend URL into a copy for static hosting
-├── scripts/
-│   ├── setup-wsl.sh         one-shot toolchain provisioning
-│   ├── build.sh             configure + build
-│   ├── demo.sh              guided tour of every layer
-│   ├── verify-all.sh        every check, one command
-│   ├── smoke-test.sh        KV over real redis-cli
-│   ├── smoke-exchange.sh    HTTP + matching engine
-│   ├── smoke-persistence.sh SIGKILL and recover
-│   ├── smoke-deploy.sh      cross-origin dashboard → server, $PORT
-│   ├── check-sanitizers.sh  ASan+UBSan and TSan
-│   └── benchmark.sh         redis-benchmark + server histogram
-├── cmake/                   warnings, sanitizers, asset embedding
-├── docs/                    architecture.md, benchmarks.md, deployment.md, diagrams
-├── .github/workflows/ci.yml matrix, sanitizers, tidy, Docker
-├── vercel.json              frontend deploy (static dashboard)
-├── render.yaml              backend deploy (Docker blueprint)
-└── Dockerfile               multi-stage, non-root
+├── frontend/                    everything the browser gets
+│   ├── index.html               the entire dashboard -- no framework, no build
+│   │                            step, no CDN. Also embedded into the binary.
+│   ├── build.sh                 stamps the backend URL in for static hosting
+│   └── vercel.json              Vercel config (Root Directory = frontend/)
+│
+├── backend/                     everything the server is
+│   ├── CMakeLists.txt
+│   ├── Dockerfile               multi-stage, non-root; build from the repo root
+│   ├── include/bourse/          core, storage, cache, auth, exec, sql, match,
+│   │                            net, server
+│   ├── src/                     implementations, mirroring include/
+│   ├── apps/bourse_server/      the executable
+│   ├── apps/crypto_check/       CLI used to diff the crypto against hashlib
+│   ├── tests/                   13 GoogleTest files, 286 tests
+│   ├── cmake/                   warnings, sanitizers, asset embedding
+│   └── scripts/
+│       ├── setup-wsl.sh         one-shot toolchain provisioning
+│       ├── build.sh             configure + build
+│       ├── demo.sh              guided tour of every layer
+│       ├── verify-all.sh        every check, one command
+│       ├── smoke-test.sh        KV over real redis-cli
+│       ├── smoke-exchange.sh    HTTP + matching engine
+│       ├── smoke-persistence.sh SIGKILL and recover
+│       ├── smoke-deploy.sh      cross-origin split + auth, both protocols
+│       ├── verify-crypto.sh     crypto vs. Python hashlib
+│       ├── check-sanitizers.sh  ASan+UBSan and TSan
+│       └── benchmark.sh         redis-benchmark + server histogram
+│
+├── docs/                        architecture, benchmarks, deployment, security
+├── .github/workflows/ci.yml     matrix, sanitizers, tidy, Docker
+├── render.yaml                  backend deploy; Render only reads it at the root
+└── docker-compose.yml
 ```
 
 ---
@@ -417,14 +465,16 @@ Browser ──HTTPS──► Vercel (dashboard, static, CDN) ──fetch/CORS─
 
 | Half | Host | Why |
 |---|---|---|
-| Dashboard | **Vercel** | One dependency-free HTML file. `web/build.sh` stamps the backend URL into a copy of the *same* file the binary embeds, so there is no second copy to keep in sync. |
-| Server | **Render** (free, Docker) | Builds the existing `Dockerfile`. Reads `$PORT`, so the image deploys unchanged to Railway, Cloud Run or Fly.io too. |
+| Dashboard | **Vercel** | One dependency-free HTML file. `frontend/build.sh` stamps the backend URL into a copy of the *same* file the binary embeds, so there is no second copy to keep in sync. |
+| Server | **Render** (free, Docker) | Builds `backend/Dockerfile` from the repo root. Reads `$PORT`, so the image deploys unchanged to Railway, Cloud Run or Fly.io too. |
 
 ```bash
-bash scripts/smoke-deploy.sh    # proves the split works before you deploy it
+bash backend/scripts/smoke-deploy.sh   # proves the split works before you deploy it
 ```
 
-That starts the server, builds the static bundle, serves it from a *different* origin and asserts the whole path — `$PORT` handling, CORS pre-flight, cross-origin `GET`/`POST`, the injected URL, and that the embedded copy still defaults to same-origin. In a browser every one of those failures looks identical: a blank page and a console message nobody opens.
+That starts the server, builds the static bundle, serves it from a *different* origin and asserts the whole path — `$PORT` handling, CORS pre-flight, cross-origin `GET`/`POST`, the injected URL, and that the embedded copy still defaults to same-origin. Then it starts a *second* server with authentication on and checks the login flow, role enforcement and revocation over both HTTP and `redis-cli`. 42 assertions.
+
+In a browser every one of those failures looks identical: a blank page and a console message nobody opens.
 
 Two things worth knowing about the free tier, both covered in the guide: Render sleeps after 15 minutes idle and takes ~50 s to wake, and only the HTTP port is public, so `redis-cli` cannot reach the deployed instance. Fly.io can expose RESP on 6380 if that matters.
 
@@ -435,9 +485,9 @@ Two things worth knowing about the free tier, both covered in the guide: Render 
 `Poller` has two implementations: `epoll` on Linux, portable `poll` everywhere else. Windows compiles via the Winsock paths, but Linux is the tested target — `perf`, `valgrind` and `redis-benchmark` all live there.
 
 ```bash
-bash scripts/syntax-check.sh          # type-check every TU without linking
-bash scripts/build.sh Debug address   # + AddressSanitizer
-bash scripts/build.sh Debug thread    # + ThreadSanitizer
+bash backend/scripts/syntax-check.sh          # type-check every TU without linking
+bash backend/scripts/build.sh Debug address   # + AddressSanitizer
+bash backend/scripts/build.sh Debug thread    # + ThreadSanitizer
 ```
 
 ---

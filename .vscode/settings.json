@@ -11,12 +11,16 @@
   // Note: the paths inside it are WSL paths (/mnt/c/...), so this only
   // resolves correctly when the folder is opened *in WSL*. See README.
   // ---------------------------------------------------------------------
-  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/backend/build/compile_commands.json",
   "C_Cpp.default.cppStandard": "c++20",
   "C_Cpp.default.compilerPath": "/usr/bin/g++",
   "C_Cpp.default.intelliSenseMode": "linux-gcc-x64",
 
-  "cmake.buildDirectory": "${workspaceFolder}/build",
+  // CMakeLists.txt lives in backend/, not at the workspace root, so cmake-tools
+  // has to be told where to look -- otherwise it reports "no CMakeLists.txt"
+  // and offers to create one.
+  "cmake.sourceDirectory": "${workspaceFolder}/backend",
+  "cmake.buildDirectory": "${workspaceFolder}/backend/build",
   "cmake.generator": "Ninja",
   "cmake.configureOnOpen": false,
   "cmake.configureArgs": ["-DBOURSE_BUILD_TESTS=ON"],

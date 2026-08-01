@@ -1,8 +1,10 @@
 services:
   bourse:
     build:
+      # Context is the repo root, not backend/: the server embeds
+      # frontend/index.html, so the build needs to see both halves.
       context: .
-      dockerfile: Dockerfile
+      dockerfile: backend/Dockerfile
     image: bourse:latest
     container_name: bourse
     ports:

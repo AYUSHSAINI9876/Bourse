@@ -27,8 +27,8 @@ coverage/
 *.profraw
 *.profdata
 
-# Static deploy output: generated from dashboard/index.html by web/build.sh
-web/dist/
+# Static deploy output: generated from frontend/index.html by frontend/build.sh
+frontend/dist/
 .vercel/
 
 # Runtime data
