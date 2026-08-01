@@ -277,23 +277,27 @@ The tests are not decorative. A representative sample of what they pin down:
 
 **Machine:** 4-core WSL2 VM, GCC 15.2.0, `RelWithDebInfo`, 200k requests, 50 clients, stock `redis-benchmark`.
 
-| Workload | Throughput | Client p50 |
-|---|--:|--:|
-| `SET`, no pipelining | 42,992 ops/s | 0.535 ms |
-| `GET`, no pipelining | 43,592 ops/s | 0.535 ms |
-| `SET`, pipeline depth 16 | **501,253 ops/s** | 0.623 ms |
-| `GET`, pipeline depth 16 | **598,802 ops/s** | 0.647 ms |
+Client-side throughput across three runs of the **same binary on the same machine**:
 
-Server-side, from the built-in HDR histogram over 1,000,005 commands:
+| Workload | Run A | Run B | Run C |
+|---|--:|--:|--:|
+| `SET`, no pipelining | 42,992 | 21,064 | 19,614 |
+| `GET`, no pipelining | 43,592 | 21,894 | 11,752 |
+| `SET`, pipeline depth 16 | 501,253 | 208,117 | **1,342,282** |
+| `GET`, pipeline depth 16 | 598,802 | 248,447 | **1,273,885** |
 
-```
-command_latency_p50_ns:576
-command_latency_p99_ns:2304
-```
+A 5× spread on identical code, so **no single figure there is worth quoting.** A 4-core WSL2 VM on a laptop, reached over emulated loopback, is not a measurement platform — one `GET` window in run C fell to 32 ops/s with a 2,993 ms average before recovering to 60,000.
 
-**p50 576 ns, p99 2.3 µs** for the full path: parse → registry lookup → arity check → shard lock → hash probe → mutate → encode.
+The number that *is* stable is the server timing its own work, from the built-in HDR histogram over 1,000,005 commands:
 
-The unpipelined figures are **client-bound, not server-bound** — in sequential mode each client waits for a reply before sending again, so 43k ops/s measures loopback round-trip, which is exactly why the server's own histogram reports sub-microsecond work for the same commands. The 14× jump under pipelining is that round-trip being amortised away. Full discussion in [docs/benchmarks.md](docs/benchmarks.md).
+| | Run A | Run B | Run C |
+|---|--:|--:|--:|
+| `command_latency_p50_ns` | 576 | 576 | **416** |
+| `command_latency_p99_ns` | 2,304 | 3,328 | 2,560 |
+
+**Sub-microsecond p50** for the full path: parse → registry lookup → arity check → permission check → shard lock → hash probe → mutate → encode. Tight across runs where the client-side numbers moved 5× — which is the expected shape, and the reason to trust it.
+
+The unpipelined figures are **client-bound, not server-bound**: each client waits for a reply before sending again, so they measure loopback round-trip. The jump under pipelining is that round-trip being amortised away. Full discussion, including why authentication costs nothing per command, in [docs/benchmarks.md](docs/benchmarks.md).
 
 ---
 

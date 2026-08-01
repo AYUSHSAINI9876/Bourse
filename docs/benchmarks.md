@@ -21,36 +21,76 @@ Every number below was measured on:
 | Client | stock `redis-benchmark` 8.0.5 |
 | Load | 200,000 requests, 50 concurrent clients |
 
-A number without a machine attached to it is not a measurement. WSL2 loopback understates native Linux noticeably, so treat these as a floor.
+A number without a machine attached to it is not a measurement -- and a number from *one run* on a machine this noisy is barely one either. See the spread below.
 
 ---
 
 ## Throughput
 
-| Workload | Throughput | Client p50 |
-|---|--:|--:|
-| `SET`, sequential | 42,992 ops/s | 0.535 ms |
-| `GET`, sequential | 43,592 ops/s | 0.535 ms |
-| `INCR`, sequential | 42,114 ops/s | 0.527 ms |
-| `SET`, pipeline depth 16 | 501,253 ops/s | 0.623 ms |
-| `GET`, pipeline depth 16 | 598,802 ops/s | 0.647 ms |
+Three runs on the same machine and the same binary, so the spread below is the
+measurement environment rather than the code:
+
+| Workload | Run A | Run B | Run C |
+|---|--:|--:|--:|
+| `SET`, sequential | 42,992 | 21,064 | 19,614 |
+| `GET`, sequential | 43,592 | 21,894 | 11,752 |
+| `INCR`, sequential | 42,114 | 24,558 | 52,466 |
+| `SET`, pipeline depth 16 | 501,253 | 208,117 | **1,342,282** |
+| `GET`, pipeline depth 16 | 598,802 | 248,447 | **1,273,885** |
+
+A 5× spread on identical code. Run B started immediately after two sanitizer
+builds; run C was on a freshly restarted VM but still showed the host stalling
+mid-measurement — one `GET` window fell to 32 ops/s with a 2,993 ms average
+before recovering to 60,000 ops/s.
+
+**So do not quote a single number from this table.** A 4-core WSL2 VM on a
+laptop, sharing a kernel with Windows and reaching the server over emulated
+loopback, is not a measurement platform. Publishing one run from it as *the*
+throughput figure would be the kind of benchmark that is technically true and
+substantively meaningless.
 
 ## Server-side latency
 
-From the built-in HDR-style histogram, after 1,000,005 commands:
+This is the number worth trusting, because it excludes the client, the
+loopback and the scheduler entirely — it is the server timing its own work with
+the built-in HDR-style histogram, over 1,000,005 commands:
 
-```
-command_latency_p50_ns:576
-command_latency_p99_ns:2304
+| | Run A | Run B | Run C |
+|---|--:|--:|--:|
+| `command_latency_p50_ns` | 576 | 576 | 416 |
+| `command_latency_p99_ns` | 2,304 | 3,328 | 2,560 |
+
+Tight across runs where the client-side figures moved 5×, which is exactly the
+expected shape: the server's own work is stable and the variance lives in
+everything around it.
+
+This covers the whole dispatch path: parse → registry lookup → arity validation
+→ **permission check** → shard lock → hash probe → mutate → encode reply.
+
+### Does authentication cost anything?
+
+No, when it is off — and off is the default. The check short-circuits on a
+pointer and a bool before touching the principal:
+
+```cpp
+if (context.server.auth != nullptr && context.server.auth->enabled()) { … }
 ```
 
-This covers the whole dispatch path: parse → registry lookup → arity validation → shard lock → hash probe → mutate → encode reply.
+Runs A and B predate the auth layer; run C includes it. p50 went from 576 ns to
+416 ns across that change, which is not evidence that auth made the server
+faster — it is evidence that the difference is below this machine's noise
+floor.
+
+With auth *enabled*, the added work per command is one integer comparison
+(`role >= required`). The expensive part of authentication is PBKDF2, and that
+runs once per login, never per command — which is why login is rate-limited and
+command dispatch is not.
 
 ---
 
-## Interpreting the 14× pipelining gap
+## Interpreting the pipelining gap
 
-The sequential numbers are **client-bound**. In sequential mode each client blocks for a reply before sending again, so 43k ops/s is measuring loopback round-trip time, not server capacity. The server's own histogram says the same commands take 576 ns of actual work — three orders of magnitude below the 0.535 ms the client observes.
+The sequential numbers are **client-bound**. In sequential mode each client blocks for a reply before sending again, so those figures measure loopback round-trip time, not server capacity. The server's own histogram says the same commands take 416--576 ns of actual work — three orders of magnitude below the ~0.5 ms the client observes.
 
 The pipelined numbers are the ones that actually saturate the server. The gap between them is round-trip cost being amortised away, and it is the single most useful thing this benchmark demonstrates: **for a store this fast, the network dominates unless the client batches.**
 
@@ -108,4 +148,4 @@ Sanitizer builds are 2–5× slower and are not comparable to the numbers above.
 bash backend/scripts/check-sanitizers.sh
 ```
 
-Current status: **ASan + UBSan clean, TSan clean**, 235/235 tests under both.
+Current status: **ASan + UBSan clean, TSan clean**, 287/287 tests under both.
