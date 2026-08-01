@@ -90,6 +90,10 @@ std::string ResultSet::toJson() const {
   }
   out.append("],\"rows_affected\":").append(std::to_string(rows_affected));
   out.append(",\"message\":").append(Datum::text(message).toJson());
+  // The plan travels with the result. Every node already describes itself, so
+  // this costs nothing to produce, and without it `EXPLAIN` is reachable over
+  // RESP but not over HTTP -- the dashboard could not show a query plan at all.
+  out.append(",\"plan\":").append(Datum::text(plan).toJson());
   out.push_back('}');
   return out;
 }

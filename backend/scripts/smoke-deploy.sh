@@ -108,6 +108,33 @@ book="$(curl -fsS "http://127.0.0.1:$http_port/api/book/AAPL" -H "Origin: $stati
 check "the cross-origin order reached the book" '"150.25"'                      "$book"
 
 # ---------------------------------------------------------------------------
+# SQL over HTTP. The dashboard's workbench is the only client for this and it
+# is cross-origin on a split deploy, so it is exercised here rather than in
+# smoke-exchange.sh.
+# ---------------------------------------------------------------------------
+sql_base="http://127.0.0.1:$http_port/api/sql"
+curl -fsS -X POST "$sql_base" -d 'CREATE TABLE fills (id INTEGER, sym TEXT, qty INTEGER)' >/dev/null
+curl -fsS -X POST "$sql_base" -d "INSERT INTO fills VALUES (1, 'AAPL', 100), (2, 'MSFT', 50)" >/dev/null
+
+select_result="$(curl -fsS -X POST "$sql_base" -H "Origin: $static_origin" \
+  -d 'SELECT sym, qty FROM fills WHERE qty > 60 ORDER BY qty DESC')"
+check "SQL returns columns"                  '"columns":["sym","qty"]'         "$select_result"
+check "SQL returns the matching row"         '"AAPL"'                          "$select_result"
+check "SQL filtered the non-matching row"    '"rows":[["AAPL",100]]'           "$select_result"
+
+# The plan travels with every result set. Without it the dashboard cannot show
+# a query plan at all, because EXPLAIN is a RESP verb and not SQL the parser
+# accepts -- a gap that is invisible until someone clicks the button.
+check "SQL result carries the query plan"    '"plan":'                         "$select_result"
+check "plan names the scan"                  'SeqScan'                         "$select_result"
+check "plan names the filter"                'Filter'                          "$select_result"
+
+check "a non-query reports an empty plan"    '"plan":""' \
+  "$(curl -fsS -X POST "$sql_base" -d "INSERT INTO fills VALUES (3, 'TSLA', 7)")"
+check "a malformed statement is a 400"       "400" \
+  "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$sql_base" -d 'SELCT * FROM fills')"
+
+# ---------------------------------------------------------------------------
 # The static bundle: what Vercel actually serves.
 # ---------------------------------------------------------------------------
 echo

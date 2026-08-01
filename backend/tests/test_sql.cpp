@@ -369,6 +369,25 @@ TEST_F(SqlFixture, RendersResultsAsJsonAndText) {
   EXPECT_NE(text.find("(1 row)"), std::string::npos);
 }
 
+TEST_F(SqlFixture, JsonCarriesTheQueryPlan) {
+  seed();
+  const ResultSet result = run("SELECT id FROM trades WHERE id = 1");
+  const std::string json = result.toJson();
+
+  // The plan has to survive serialisation, or EXPLAIN works over RESP and is
+  // simply unavailable over HTTP -- and the dashboard, which only speaks HTTP,
+  // could never show a query plan.
+  ASSERT_NE(json.find("\"plan\":"), std::string::npos) << json;
+  EXPECT_NE(json.find("SeqScan"), std::string::npos) << json;
+  EXPECT_NE(json.find("Filter"), std::string::npos) << json;
+
+  // Plan text is multi-line and contains quotes and parentheses, so it must be
+  // escaped rather than concatenated in raw.
+  const ResultSet nothing = run("INSERT INTO trades VALUES (99, 'ZZZZ', 1, 1.0)");
+  EXPECT_NE(nothing.toJson().find("\"plan\":\"\""), std::string::npos)
+      << "a non-query should report an empty plan, not omit the field";
+}
+
 TEST(LikeMatch, HandlesSqlWildcards) {
   EXPECT_TRUE(likeMatch("A%", "AAPL"));
   EXPECT_FALSE(likeMatch("A%", "MSFT"));

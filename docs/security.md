@@ -294,7 +294,7 @@ why there is no committed default anywhere in this repository.
 
 ```bash
 bash backend/scripts/verify-crypto.sh # crypto vs. Python hashlib
-bash backend/scripts/smoke-deploy.sh  # 42 assertions, auth over both protocols
+bash backend/scripts/smoke-deploy.sh  # 50 assertions, auth over both protocols
 ./backend/build/bin/bourse_tests --gtest_filter='*Auth*:*Sha256*:*Hmac*:*Pbkdf2*:*Password*:*Role*:*Json*'
 ```
 

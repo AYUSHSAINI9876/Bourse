@@ -808,12 +808,22 @@ function renderResultSet(result) {
   ).join("") || `<tr><td colspan="${columns.length}" class="empty">0 rows</td></tr>`;
 }
 
-async function runSql(prefix) {
+async function runSql(showPlan) {
   const text = $("sql").value.trim();
   if (!text) return;
   try {
-    const result = await api("/api/sql", { method: "POST", body: prefix + text });
-    renderResultSet(result);
+    // No "EXPLAIN " prefix: that is a RESP verb, not SQL, and the parser
+    // rejects it. The plan is returned alongside every result set, so
+    // explaining a query is a display choice rather than a different request.
+    const result = await api("/api/sql", { method: "POST", body: text });
+    if (showPlan) {
+      $("sqlHead").innerHTML = "";
+      $("sqlBody").innerHTML = "";
+      $("sqlOut").hidden = false;
+      $("sqlOut").textContent = result.plan || "no plan (this statement is not a query)";
+    } else {
+      renderResultSet(result);
+    }
   } catch (e) {
     $("sqlHead").innerHTML = "";
     $("sqlBody").innerHTML = "";
@@ -823,13 +833,13 @@ async function runSql(prefix) {
   refresh();
 }
 
-$("runSql").onclick = () => runSql("");
-$("explain").onclick = () => runSql("EXPLAIN ");
+$("runSql").onclick = () => runSql(false);
+$("explain").onclick = () => runSql(true);
 $("sql").addEventListener("keydown", (event) => {
   // Ctrl/Cmd+Enter runs; plain Enter inserts a newline, which is what a
   // multi-line editor should do.
   if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-    runSql("");
+    runSql(false);
     event.preventDefault();
   }
 });

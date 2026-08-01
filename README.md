@@ -5,7 +5,7 @@
 <p>
   <img alt="C++20" src="https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white">
   <img alt="CMake" src="https://img.shields.io/badge/build-CMake%20%2B%20Ninja-064F8C?logo=cmake&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-286%20passing-2ea043">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-287%20passing-2ea043">
   <img alt="Sanitizers" src="https://img.shields.io/badge/ASan%20%C2%B7%20UBSan%20%C2%B7%20TSan-clean-2ea043">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Linux%20%C2%B7%20WSL%20%C2%B7%20Docker-333">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
@@ -240,11 +240,11 @@ Or individually:
 
 | What | Command | Result |
 |---|---|---|
-| Unit + integration | `./backend/build/bin/bourse_tests` | **286 tests, 52 suites** |
+| Unit + integration | `./backend/build/bin/bourse_tests` | **287 tests, 52 suites** |
 | KV over real `redis-cli` | `bash backend/scripts/smoke-test.sh` | **68 assertions** |
 | HTTP + exchange | `bash backend/scripts/smoke-exchange.sh` | **42 assertions** |
 | Crash recovery | `bash backend/scripts/smoke-persistence.sh` | **27 assertions** |
-| Split deployment, CORS, `$PORT`, auth | `bash backend/scripts/smoke-deploy.sh` | **42 assertions** |
+| Split deploy, CORS, `$PORT`, auth, SQL | `bash backend/scripts/smoke-deploy.sh` | **50 assertions** |
 | Crypto vs. Python hashlib | `bash backend/scripts/verify-crypto.sh` | **850 digests** |
 | ASan + UBSan + TSan | `bash backend/scripts/check-sanitizers.sh` | **clean** |
 | Throughput + latency | `bash backend/scripts/benchmark.sh` | see below |
@@ -416,7 +416,7 @@ Bourse/
 │   ├── src/                     implementations, mirroring include/
 │   ├── apps/bourse_server/      the executable
 │   ├── apps/crypto_check/       CLI used to diff the crypto against hashlib
-│   ├── tests/                   13 GoogleTest files, 286 tests
+│   ├── tests/                   13 GoogleTest files, 287 tests
 │   ├── cmake/                   warnings, sanitizers, asset embedding
 │   └── scripts/
 │       ├── setup-wsl.sh         one-shot toolchain provisioning
@@ -472,7 +472,7 @@ Browser ──HTTPS──► Vercel (dashboard, static, CDN) ──fetch/CORS─
 bash backend/scripts/smoke-deploy.sh   # proves the split works before you deploy it
 ```
 
-That starts the server, builds the static bundle, serves it from a *different* origin and asserts the whole path — `$PORT` handling, CORS pre-flight, cross-origin `GET`/`POST`, the injected URL, and that the embedded copy still defaults to same-origin. Then it starts a *second* server with authentication on and checks the login flow, role enforcement and revocation over both HTTP and `redis-cli`. 42 assertions.
+That starts the server, builds the static bundle, serves it from a *different* origin and asserts the whole path — `$PORT` handling, CORS pre-flight, cross-origin `GET`/`POST`, the injected URL, and that the embedded copy still defaults to same-origin. Then it starts a *second* server with authentication on and checks the login flow, role enforcement and revocation over both HTTP and `redis-cli`, and SQL over HTTP including the query plan. 50 assertions.
 
 In a browser every one of those failures looks identical: a blank page and a console message nobody opens.
 
