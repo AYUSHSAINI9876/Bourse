@@ -178,6 +178,7 @@ echo "-- authentication --"
 
 auth_port=18081
 BOURSE_AUTH=yes BOURSE_ADMIN_USER=root BOURSE_ADMIN_PASSWORD=root-password-1 \
+BOURSE_DEMO_USER=guest BOURSE_DEMO_PASSWORD=guest-password-1 \
   "$server_bin" --host 127.0.0.1 --http-port "$auth_port" --port 16381 \
   --dir "$work_dir/auth-data" --auth-iterations 1000 --log-level error \
   >"$work_dir/auth.log" 2>&1 &
@@ -271,6 +272,27 @@ else
   curl -fsS -X POST "$auth_base/api/auth/logout" -H "$reader_header" >/dev/null
   check "logout revokes the token"        "401" \
     "$(curl -s -o /dev/null -w '%{http_code}' "$auth_base/api/stats" -H "$reader_header")"
+
+  # The seeded read-only account is what lets a public deployment be explored
+  # without publishing admin credentials, so its role has to be exactly right.
+  # Unlike an account created at runtime it survives a restart, which is the
+  # whole reason a README can advertise it.
+  demo_login="$(curl -fsS -X POST "$auth_base/api/auth/login" \
+    -H 'Content-Type: application/json' \
+    -d '{"username":"guest","password":"guest-password-1"}')"
+  check "seeded demo account can log in"  '"token"'          "$demo_login"
+  check "demo account is a viewer"        '"role":"viewer"'  "$demo_login"
+
+  demo_token="$(printf '%s' "$demo_login" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+  check "demo account can read"           "200" \
+    "$(curl -s -o /dev/null -w '%{http_code}' "$auth_base/api/stats" \
+       -H "Authorization: Bearer $demo_token")"
+  check "demo account cannot write"       "403" \
+    "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$auth_base/api/command" \
+       -H "Authorization: Bearer $demo_token" -d 'SET nope nope')"
+  check "demo account cannot FLUSHALL"    "403" \
+    "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$auth_base/api/command" \
+       -H "Authorization: Bearer $demo_token" -d 'FLUSHALL')"
 
   check "a forged token is refused"       "401" \
     "$(curl -s -o /dev/null -w '%{http_code}' "$auth_base/api/stats" \

@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 560" width="940" height="560" role="img" aria-label="Panel map of the Bourse dashboard: header with identity and role, server stats with sparklines, order book, trade tape, latency histogram and order entry, command console, keyspace browser, SQL workbench and user administration">
+  <style>
+    :root { color-scheme: light dark; }
+    .bg     { fill: #ffffff; }
+    .title  { fill: #111827; font: 700 21px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .sub    { fill: #6b7280; font: 400 13px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .pname  { fill: #111827; font: 600 13px ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .item   { fill: #374151; font: 400 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .muted  { fill: #9ca3af; font: 400 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .chrome { fill: #f9fafb; stroke: #d1d5db; stroke-width: 1.5; }
+    .panel  { fill: #ffffff; stroke: #d1d5db; stroke-width: 1.5; }
+    .accent { fill: #eff6ff; stroke: #2563eb; stroke-width: 1.5; }
+    .admin  { fill: #fffbeb; stroke: #b45309; stroke-width: 1.5; }
+    .up     { fill: #16a34a; } .down { fill: #dc2626; }
+    .bar    { fill: #2563eb; }
+    .spark  { stroke: #2563eb; stroke-width: 1.5; fill: none; }
+    .tag    { fill: #2563eb; }
+    .tagtxt { fill: #ffffff; font: 700 9.5px ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
+
+    @media (prefers-color-scheme: dark) {
+      .bg     { fill: #0d1117; }
+      .title  { fill: #e6edf3; }
+      .sub    { fill: #8b949e; }
+      .pname  { fill: #e6edf3; }
+      .item   { fill: #c9d1d9; }
+      .muted  { fill: #6e7681; }
+      .chrome { fill: #161b22; stroke: #30363d; }
+      .panel  { fill: #161b22; stroke: #30363d; }
+      .accent { fill: #10203a; stroke: #4c8dff; }
+      .admin  { fill: #2b2011; stroke: #d29922; }
+      .up     { fill: #3fb950; } .down { fill: #f85149; }
+      .bar    { fill: #4c8dff; }
+      .spark  { stroke: #4c8dff; }
+      .tag    { fill: #4c8dff; }
+      .tagtxt { fill: #06101f; }
+    }
+  </style>
+
+  <rect class="bg" width="940" height="560"/>
+  <text class="title" x="28" y="34">The dashboard, panel by panel</text>
+  <text class="sub"   x="28" y="55">A layout map, not a screenshot. One dependency-free HTML file — compiled into the server binary and served by the CDN.</text>
+
+  <!-- header chrome -->
+  <rect class="chrome" x="28" y="72" width="884" height="42" rx="7"/>
+  <text class="pname" x="44"  y="98">Bourse</text>
+  <circle cx="112" cy="93" r="4" class="up"/>
+  <text class="item"  x="122" y="97">connected</text>
+  <text class="muted" x="196" y="97">up 2h 14m</text>
+  <text class="item"  x="600" y="97">admin</text>
+  <rect class="tag" x="646" y="86" width="44" height="15" rx="4"/>
+  <text class="tagtxt" x="654" y="97">ADMIN</text>
+  <text class="muted" x="704" y="97">symbol AAPL</text>
+  <text class="muted" x="812" y="97">backend ⋯</text>
+
+  <!-- server stats -->
+  <rect class="panel" x="28" y="126" width="884" height="96" rx="7"/>
+  <text class="pname" x="44" y="147">Server</text>
+  <text class="muted" x="112" y="147">keys · memory · hit rate · evicted · expired · commands · orders · trades · volume · resting</text>
+  <g class="bar">
+    <rect x="44"  y="158" width="74" height="24" rx="4" opacity="0.14"/>
+    <rect x="126" y="158" width="74" height="24" rx="4" opacity="0.14"/>
+    <rect x="208" y="158" width="74" height="24" rx="4" opacity="0.14"/>
+    <rect x="290" y="158" width="74" height="24" rx="4" opacity="0.14"/>
+    <rect x="372" y="158" width="74" height="24" rx="4" opacity="0.14"/>
+  </g>
+  <text class="muted" x="470" y="166">commands/sec</text>
+  <path class="spark" d="M470 182 L494 176 L518 179 L542 168 L566 172 L590 162"/>
+  <text class="muted" x="616" y="166">p99 latency</text>
+  <path class="spark" d="M616 180 L640 174 L664 178 L688 170 L712 176 L736 171"/>
+  <text class="muted" x="762" y="166">keys</text>
+  <path class="spark" d="M762 182 L786 179 L810 174 L834 170 L858 165 L882 160"/>
+  <text class="muted" x="44" y="200">Derived from the delta between polls, so a late poll cannot inflate the rate.</text>
+
+  <!-- three-column row -->
+  <rect class="panel" x="28" y="234" width="286" height="150" rx="7"/>
+  <text class="pname" x="44" y="255">Order book</text>
+  <text class="muted" x="150" y="255">depth ladder</text>
+  <g class="item">
+    <text class="down" x="44" y="275">100.75   40   2</text>
+    <text class="down" x="44" y="292">100.50   85   3</text>
+    <text class="muted" x="44" y="311">— spread 0.25 · last 100.50 —</text>
+    <text class="up"   x="44" y="330">100.25  120   4</text>
+    <text class="up"   x="44" y="347">100.00   60   1</text>
+  </g>
+  <text class="muted" x="44" y="370">Bars behind each level scale to the largest.</text>
+
+  <rect class="panel" x="326" y="234" width="286" height="150" rx="7"/>
+  <text class="pname" x="342" y="255">Trade tape</text>
+  <text class="muted" x="440" y="255">every fill, newest first</text>
+  <g class="item">
+    <text class="up"   x="342" y="277">#412  BUY   100.50   25</text>
+    <text class="down" x="342" y="295">#411  SELL  100.25   10</text>
+    <text class="up"   x="342" y="313">#410  BUY   100.50    5</text>
+    <text class="down" x="342" y="331">#409  SELL  100.00   40</text>
+  </g>
+  <text class="muted" x="342" y="370">Also published to trades:&lt;SYMBOL&gt; over pub/sub.</text>
+
+  <rect class="panel" x="624" y="234" width="288" height="150" rx="7"/>
+  <text class="pname" x="640" y="255">Latency + order entry</text>
+  <g class="item">
+    <text x="640" y="276">p50</text><rect class="bar" x="676" y="270" width="38" height="6" rx="3"/><text x="826" y="276">416</text>
+    <text x="640" y="292">p99</text><rect class="bar" x="676" y="286" width="128" height="6" rx="3"/><text x="820" y="292">2560</text>
+  </g>
+  <text class="muted" x="640" y="310">nanoseconds, server-side</text>
+  <g class="item">
+    <text x="640" y="332">BUY ▾   LIMIT ▾   qty   price   GTC ▾</text>
+  </g>
+  <rect class="tag" x="640" y="342" width="56" height="18" rx="4"/>
+  <text class="tagtxt" x="655" y="355">SUBMIT</text>
+  <text class="muted" x="640" y="374">Disabled for viewers, not merely hidden.</text>
+
+  <!-- console + keyspace -->
+  <rect class="accent" x="28" y="396" width="530" height="66" rx="7"/>
+  <text class="pname" x="44" y="417">Command console</text>
+  <text class="muted" x="182" y="417">POST /api/command · ↑↓ history · press /</text>
+  <text class="item"  x="44" y="438">&gt; ORDER AAPL BUY LIMIT 10 150.25</text>
+  <text class="muted" x="44" y="454">The same registry the RESP port serves — all 60 verbs.</text>
+
+  <rect class="panel" x="570" y="396" width="342" height="66" rx="7"/>
+  <text class="pname" x="586" y="417">Keyspace browser</text>
+  <text class="item"  x="586" y="438">user:1        ayush</text>
+  <text class="muted" x="586" y="454">Glob scan, capped at 100 keys.</text>
+
+  <!-- sql + users -->
+  <rect class="accent" x="28" y="474" width="530" height="66" rx="7"/>
+  <text class="pname" x="44" y="495">SQL workbench</text>
+  <text class="muted" x="164" y="495">Ctrl+Enter runs · press s</text>
+  <text class="item"  x="44" y="516">SELECT sym, qty FROM fills WHERE qty &gt; 60</text>
+  <text class="muted" x="44" y="532">Explain renders the plan tree with live row counts.</text>
+
+  <rect class="admin" x="570" y="474" width="342" height="66" rx="7"/>
+  <text class="pname" x="586" y="495">Users</text>
+  <text class="muted" x="632" y="495">admin only</text>
+  <text class="item"  x="586" y="516">guest    viewer      admin    admin</text>
+  <text class="muted" x="586" y="532">Hidden for non-admins; refused by the server regardless.</text>
+</svg>

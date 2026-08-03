@@ -60,6 +60,15 @@ struct Config {
   /// server can be deployed without a secret being committed anywhere.
   std::string admin_user = "admin";
   std::string admin_password;
+
+  /// Optional read-only account, seeded at startup like the administrator.
+  ///
+  /// Exists so a public demo has something to hand out. Users created at
+  /// runtime live only in memory and vanish on restart, so a README could not
+  /// advertise them; this one is configuration and comes back every time.
+  /// Empty (the default) creates nothing.
+  std::string demo_user;
+  std::string demo_password;
   std::int64_t session_ttl_seconds = 12 * 60 * 60;
   std::uint32_t auth_iterations = 210000;
 

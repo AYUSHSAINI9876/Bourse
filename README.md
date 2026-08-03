@@ -3,12 +3,65 @@
 **A from-scratch trading exchange with its own storage engine, cache, and query layer.** Modern C++20, zero third-party runtime dependencies, a hand-written `epoll` reactor, and wire compatibility with `redis-cli`.
 
 <p>
+  <a href="https://bourse-mocha.vercel.app"><img alt="Live demo" src="https://img.shields.io/badge/live%20demo-open-2ea043?style=for-the-badge"></a>
+  <a href="https://bourse-kn9j.onrender.com/health"><img alt="API" src="https://img.shields.io/badge/API-health-2563eb?style=for-the-badge"></a>
+</p>
+
+<p>
   <img alt="C++20" src="https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white">
   <img alt="CMake" src="https://img.shields.io/badge/build-CMake%20%2B%20Ninja-064F8C?logo=cmake&logoColor=white">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-287%20passing-2ea043">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-290%20passing-2ea043">
   <img alt="Sanitizers" src="https://img.shields.io/badge/ASan%20%C2%B7%20UBSan%20%C2%B7%20TSan-clean-2ea043">
-  <img alt="Platform" src="https://img.shields.io/badge/platform-Linux%20%C2%B7%20WSL%20%C2%B7%20Docker-333">
+  <img alt="Frontend" src="https://img.shields.io/badge/frontend-Vercel-000?logo=vercel&logoColor=white">
+  <img alt="Backend" src="https://img.shields.io/badge/backend-Render%20%C2%B7%20Docker-46E3B7?logo=render&logoColor=white">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
+</p>
+
+---
+
+## Try it
+
+| | |
+|---|---|
+| **Dashboard** | **<https://bourse-mocha.vercel.app>** |
+| **API** | **<https://bourse-kn9j.onrender.com>** |
+
+Sign in read-only:
+
+```
+username:  guest
+password:  explore-bourse-2026
+```
+
+> **First load takes ~50 seconds.** The backend runs on Render's free tier, which sleeps after 15 minutes idle. The dashboard will say "server unreachable" while it wakes — reload once and it comes up. Every load after that is instant.
+
+`guest` is a **viewer**: it can read everything and write nothing. Try `SET k v` in the console and the server answers `NOPERM` — that refusal comes from the same permission check that guards the RESP port, which is the point of the whole auth layer.
+
+**Once you are in, in about ninety seconds:**
+
+1. **Command console** — `ORDER AAPL SELL LIMIT 10 100.50`, then `ORDER AAPL BUY LIMIT 4 101.00`. Watch the depth ladder and trade tape react. *(Read-only as `guest`; the demo server has live data from other visitors.)*
+2. **SQL panel** — `SELECT * FROM fills` then hit **Explain** to see the query plan with live row counts.
+3. **Keyspace** — scan `*` to browse what is in the store.
+4. **Sparklines** — commands/sec, p99 latency and key count, all sampled from the server's own histogram.
+
+Or skip the browser entirely:
+
+```bash
+curl https://bourse-kn9j.onrender.com/health
+# {"status":"ok","uptime_ms":398491,"version":"1.0.0"}
+
+curl -i https://bourse-kn9j.onrender.com/api/stats
+# HTTP/1.1 401 Unauthorized
+# WWW-Authenticate: Bearer realm="bourse"
+
+curl -X POST https://bourse-kn9j.onrender.com/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"guest","password":"explore-bourse-2026"}'
+# {"token":"…","username":"guest","role":"viewer","expires_at_ms":…}
+```
+
+<p align="center">
+  <img src="docs/img/dashboard.svg" alt="Panel map of the Bourse dashboard: header with identity and role badge, server stats with sparklines, order book depth ladder, trade tape, latency histogram and order entry, command console, keyspace browser, SQL workbench and admin-only user management" width="100%">
 </p>
 
 ---
@@ -240,11 +293,11 @@ Or individually:
 
 | What | Command | Result |
 |---|---|---|
-| Unit + integration | `./backend/build/bin/bourse_tests` | **287 tests, 52 suites** |
+| Unit + integration | `./backend/build/bin/bourse_tests` | **290 tests, 52 suites** |
 | KV over real `redis-cli` | `bash backend/scripts/smoke-test.sh` | **68 assertions** |
 | HTTP + exchange | `bash backend/scripts/smoke-exchange.sh` | **42 assertions** |
 | Crash recovery | `bash backend/scripts/smoke-persistence.sh` | **27 assertions** |
-| Split deploy, CORS, `$PORT`, auth, SQL | `bash backend/scripts/smoke-deploy.sh` | **50 assertions** |
+| Split deploy, CORS, `$PORT`, auth, SQL | `bash backend/scripts/smoke-deploy.sh` | **55 assertions** |
 | Crypto vs. Python hashlib | `bash backend/scripts/verify-crypto.sh` | **850 digests** |
 | ASan + UBSan + TSan | `bash backend/scripts/check-sanitizers.sh` | **clean** |
 | Throughput + latency | `bash backend/scripts/benchmark.sh` | see below |
@@ -420,7 +473,7 @@ Bourse/
 │   ├── src/                     implementations, mirroring include/
 │   ├── apps/bourse_server/      the executable
 │   ├── apps/crypto_check/       CLI used to diff the crypto against hashlib
-│   ├── tests/                   13 GoogleTest files, 287 tests
+│   ├── tests/                   13 GoogleTest files, 290 tests
 │   ├── cmake/                   warnings, sanitizers, asset embedding
 │   └── scripts/
 │       ├── setup-wsl.sh         one-shot toolchain provisioning
@@ -459,7 +512,7 @@ Bourse/
 
 ## Deploying
 
-Full walkthrough: **[docs/deployment.md](docs/deployment.md)** — GitHub push through to two live URLs.
+**Deployed and live** — [dashboard](https://bourse-mocha.vercel.app) · [API](https://bourse-kn9j.onrender.com/health). Full walkthrough: **[docs/deployment.md](docs/deployment.md)**.
 
 The deployment is split, because Vercel cannot host this server and no amount of configuration changes that. Vercel runs serverless functions scoped to a single request; Bourse is a resident multi-threaded `epoll` reactor that holds TCP connections open and keeps the keyspace, order books and buffer pool in process memory. A cache that forgets everything between requests is not a cache.
 
@@ -476,11 +529,43 @@ Browser ──HTTPS──► Vercel (dashboard, static, CDN) ──fetch/CORS─
 bash backend/scripts/smoke-deploy.sh   # proves the split works before you deploy it
 ```
 
-That starts the server, builds the static bundle, serves it from a *different* origin and asserts the whole path — `$PORT` handling, CORS pre-flight, cross-origin `GET`/`POST`, the injected URL, and that the embedded copy still defaults to same-origin. Then it starts a *second* server with authentication on and checks the login flow, role enforcement and revocation over both HTTP and `redis-cli`, and SQL over HTTP including the query plan. 50 assertions.
+That starts the server, builds the static bundle, serves it from a *different* origin and asserts the whole path — `$PORT` handling, CORS pre-flight, cross-origin `GET`/`POST`, the injected URL, and that the embedded copy still defaults to same-origin. Then it starts a *second* server with authentication on and checks the login flow, role enforcement and revocation over both HTTP and `redis-cli`, and SQL over HTTP including the query plan. 55 assertions.
 
 In a browser every one of those failures looks identical: a blank page and a console message nobody opens.
 
-Two things worth knowing about the free tier, both covered in the guide: Render sleeps after 15 minutes idle and takes ~50 s to wake, and only the HTTP port is public, so `redis-cli` cannot reach the deployed instance. Fly.io can expose RESP on 6380 if that matters.
+### What is actually running
+
+| | |
+|---|---|
+| Frontend | Vercel, `frontend/` as the project root, `BOURSE_API_BASE` stamped in at build time |
+| Backend | Render free tier, Singapore, `backend/Dockerfile` built from the repository root |
+| Auth | On. Admin from `$BOURSE_ADMIN_PASSWORD`, read-only `guest` from `$BOURSE_DEMO_PASSWORD` |
+| Persistence | WAL + snapshots to the container filesystem |
+| Redeploys | Automatic on every push to `main`, both halves |
+
+Both platforms watch `main`, so shipping a change is `git push` and nothing else. The one exception is `BOURSE_API_BASE`: it is baked into the HTML at build time rather than read at run time, so changing it needs a manual **Redeploy** on Vercel.
+
+### What the free tier costs
+
+**Render sleeps after 15 minutes idle**, and the next request takes ~50 s to wake it. That is why the demo section says so up front — a link that looks broken for a minute is worse than a link that warns you.
+
+**No persistent disk.** The WAL and snapshots live in the container filesystem, so recovery genuinely works across a process restart but not across the instance being replaced. A mounted disk at `/home/bourse/data` on a paid plan makes it durable with no code change.
+
+**Only the HTTP port is public**, so `redis-cli` cannot reach the deployed instance — Render publishes one port per web service. Every command is still reachable through `POST /api/command`. Fly.io can expose RESP on 6380 if that matters; the config is in the deployment guide.
+
+### Adding real screenshots
+
+The diagram above is a layout map, not a capture. To put real screenshots in:
+
+```bash
+# 1. Open the dashboard, press Ctrl+Shift+S (Firefox) or use
+#    DevTools → Ctrl+Shift+P → "Capture full size screenshot" (Chrome/Edge)
+# 2. Save into docs/img/ as dashboard-live.png and login.png
+# 3. Reference them:
+#      <img src="docs/img/dashboard-live.png" width="100%">
+```
+
+Keep them under ~400 KB each — GitHub renders the README on every visit, and a multi-megabyte PNG is the slowest thing on the page.
 
 ---
 

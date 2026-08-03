@@ -39,6 +39,11 @@ class ConfigEnvironmentTest : public ::testing::Test {
   static void clear() {
     ::unsetenv("PORT");
     ::unsetenv("BOURSE_HOST");
+    ::unsetenv("BOURSE_AUTH");
+    ::unsetenv("BOURSE_ADMIN_USER");
+    ::unsetenv("BOURSE_ADMIN_PASSWORD");
+    ::unsetenv("BOURSE_DEMO_USER");
+    ::unsetenv("BOURSE_DEMO_PASSWORD");
   }
 
   static void set(const char* name, const char* value) {
@@ -99,11 +104,51 @@ TEST_F(ConfigEnvironmentTest, MalformedPortIsAnErrorRatherThanASilentFallback) {
   }
 }
 
+TEST_F(ConfigEnvironmentTest, AuthCredentialsComeFromTheEnvironment) {
+  // argv is visible to every user on the box via `ps`, so credentials are read
+  // from the environment in preference to flags.
+  set("BOURSE_ADMIN_USER", "root");
+  set("BOURSE_ADMIN_PASSWORD", "a-strong-password");
+  const Result<Config> config = parse({"bourse-server"});
+  ASSERT_TRUE(config.ok()) << config.status().toString();
+  EXPECT_EQ(config.value().admin_user, "root");
+  EXPECT_EQ(config.value().admin_password, "a-strong-password");
+  // Supplying a password without asking for auth is unambiguous intent; a
+  // server that silently ignored it would be enforcing nothing.
+  EXPECT_TRUE(config.value().auth_enabled);
+}
+
+TEST_F(ConfigEnvironmentTest, DemoAccountIsOptionalAndOffByDefault) {
+  const Result<Config> absent = parse({"bourse-server"});
+  ASSERT_TRUE(absent.ok());
+  EXPECT_TRUE(absent.value().demo_user.empty());
+  EXPECT_TRUE(absent.value().demo_password.empty());
+
+  set("BOURSE_DEMO_USER", "guest");
+  set("BOURSE_DEMO_PASSWORD", "a-public-demo-password");
+  const Result<Config> present = parse({"bourse-server"});
+  ASSERT_TRUE(present.ok()) << present.status().toString();
+  EXPECT_EQ(present.value().demo_user, "guest");
+  EXPECT_EQ(present.value().demo_password, "a-public-demo-password");
+  // The demo account alone must not switch enforcement on -- it is a viewer,
+  // and a server with auth off has no roles to enforce anyway.
+  EXPECT_FALSE(present.value().auth_enabled);
+}
+
+TEST_F(ConfigEnvironmentTest, DemoFlagsOverrideTheEnvironment) {
+  set("BOURSE_DEMO_USER", "from-env");
+  const Result<Config> config = parse({"bourse-server", "--demo-user", "from-argv"});
+  ASSERT_TRUE(config.ok()) << config.status().toString();
+  EXPECT_EQ(config.value().demo_user, "from-argv");
+}
+
 TEST(ConfigUsageTest, UsageDocumentsTheEnvironmentVariables) {
   // The usage text is the only place a deployer looks before reading source.
   const std::string usage = Config::usage();
   EXPECT_NE(usage.find("PORT"), std::string::npos);
   EXPECT_NE(usage.find("BOURSE_HOST"), std::string::npos);
+  EXPECT_NE(usage.find("BOURSE_ADMIN_PASSWORD"), std::string::npos);
+  EXPECT_NE(usage.find("BOURSE_DEMO_USER"), std::string::npos);
 }
 
 }  // namespace

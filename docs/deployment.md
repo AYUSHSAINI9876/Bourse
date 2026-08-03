@@ -1,5 +1,7 @@
 # Deploying Bourse
 
+**This project is deployed:** [dashboard](https://bourse-mocha.vercel.app) · [API](https://bourse-kn9j.onrender.com/health). What follows is exactly how, reproducible from a fresh clone.
+
 ## The short version
 
 **Vercel can host the dashboard. It cannot host the server.**
@@ -192,6 +194,30 @@ Everything above is deployed wide open: anyone who finds the URL can run
 | `BOURSE_AUTH` | `yes` |
 | `BOURSE_ADMIN_USER` | `admin` |
 | `BOURSE_ADMIN_PASSWORD` | a long random string you generate |
+| `BOURSE_DEMO_USER` | `guest` (optional) |
+| `BOURSE_DEMO_PASSWORD` | a password you are happy to publish (optional) |
+
+The last two seed a **read-only viewer** at startup. Without them, a public
+deployment forces a choice between publishing admin credentials and letting
+nobody past the login screen. A viewer cannot write, cannot `FLUSHALL` and
+cannot manage users, so its password is safe in a README.
+
+Seeded from configuration rather than created at runtime on purpose: users
+live in memory, so an account added through the dashboard disappears the next
+time the free tier sleeps — and a README advertising it would start lying.
+
+Generate a password with:
+
+```bash
+openssl rand -base64 24
+```
+
+Avoid characters that are easy to mistype if anyone will ever type it by hand:
+`0`/`O` and `1`/`l`/`I` are the usual culprits. This generator excludes them:
+
+```bash
+LC_ALL=C tr -dc 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'   < /dev/urandom | head -c 24; echo
+```
 
 Environment variables rather than flags on purpose: `ps` shows a process's
 command line to every user on the box, and Render stores env vars as secrets.

@@ -208,8 +208,17 @@ Stated plainly, because a security document that only lists strengths is
 marketing.
 
 **Users are not persisted.** They live in memory and are seeded at startup from
-`$BOURSE_ADMIN_USER` / `$BOURSE_ADMIN_PASSWORD`. Users created at runtime with
-`USER ADD` are lost on restart.
+`$BOURSE_ADMIN_USER` / `$BOURSE_ADMIN_PASSWORD`, plus an optional read-only
+account from `$BOURSE_DEMO_USER` / `$BOURSE_DEMO_PASSWORD`. Users created at
+runtime with `USER ADD` are lost on restart.
+
+The demo account exists precisely because of that limitation: a public
+deployment needs credentials it can publish, and an account created through the
+dashboard would vanish the next time the host recycled the instance — leaving a
+README advertising a login that no longer works. Seeding it from configuration
+makes it come back every time. It is a `viewer`, so publishing its password
+costs nothing: it cannot write, cannot `FLUSHALL` and cannot manage users, and
+`smoke-deploy.sh` asserts all three.
 
 This is deliberate. Users *could* be journalled through the existing WAL hook —
 `USER` would only have to answer `isWrite()` honestly — but replaying
