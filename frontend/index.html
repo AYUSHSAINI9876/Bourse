@@ -4,6 +4,31 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bourse — live console</title>
+<meta name="description" content="A from-scratch trading exchange with its own storage engine, cache and query layer. C++20, zero runtime dependencies, a hand-written epoll reactor.">
+
+<!-- Favicon as an inline data URI rather than a /favicon.ico file.
+     This page is compiled into the server binary, which serves no static
+     files at all -- a separate icon file would 404 in the embedded copy and
+     show the browser's default grey globe. A data URI travels with the
+     markup, so the tab icon is identical whether the page came from the CDN
+     or from the executable, and it costs no extra request either way.
+
+     Three ascending bars: legible at 16px, which a monogram or a detailed
+     glyph is not. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%232563eb'/%3E%3Cg%20fill='%23fff'%3E%3Crect%20x='5.5'%20y='18'%20width='5'%20height='8'%20rx='1.5'/%3E%3Crect%20x='13.5'%20y='12'%20width='5'%20height='14'%20rx='1.5'/%3E%3Crect%20x='21.5'%20y='6'%20width='5'%20height='20'%20rx='1.5'/%3E%3C/g%3E%3C/svg%3E">
+
+<!-- Colours the browser chrome on mobile, and the tab strip on some desktop
+     browsers, so the page does not sit inside a mismatched white bar. -->
+<meta name="theme-color" content="#2563eb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
+
+<!-- Link previews. Without these, pasting the URL into Slack, LinkedIn or a
+     message renders a bare grey box with a domain name. -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="Bourse — exchange, cache and query engine">
+<meta property="og:description" content="A trading exchange, Redis-compatible cache, SQL engine and HTTP server, built from scratch in C++20 with no third-party runtime dependencies.">
+<meta name="twitter:card" content="summary">
+
 <!-- Deploy-time injection point.
      Empty means "same origin", which is what the server binary needs when it
      serves this page itself. frontend/build.sh rewrites this exact line during
