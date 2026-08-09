@@ -6,8 +6,8 @@
 #include <string>
 #include <thread>
 
-#include "bourse/cache/keyspace.hpp"
 #include "bourse/auth/auth_service.hpp"
+#include "bourse/cache/keyspace.hpp"
 #include "bourse/exec/command.hpp"
 #include "bourse/exec/pubsub.hpp"
 #include "bourse/match/matching_engine.hpp"
@@ -103,15 +103,24 @@ class BourseServer {
   void requestShutdown();
 
   [[nodiscard]] cache::Keyspace& keyspace() noexcept { return keyspace_; }
+
   [[nodiscard]] exec::PubSub& pubsub() noexcept { return pubsub_; }
+
   [[nodiscard]] match::MatchingEngine& matchingEngine() noexcept { return matching_engine_; }
+
   [[nodiscard]] sql::Engine& sqlEngine() noexcept { return sql_engine_; }
+
   [[nodiscard]] exec::CommandRegistry& registry() noexcept { return *registry_; }
+
   [[nodiscard]] exec::ServerContext& context() noexcept { return context_; }
+
   [[nodiscard]] auth::AuthService& auth() noexcept { return auth_; }
+
   [[nodiscard]] std::uint16_t respPort() const noexcept;
   [[nodiscard]] std::uint16_t httpPort() const noexcept;
+
   [[nodiscard]] const Config& config() const noexcept { return config_; }
+
   [[nodiscard]] net::Router& router() noexcept { return router_; }
 
  private:

@@ -20,12 +20,9 @@ using cache::ValueType;
 /// Centralised so the WRONGTYPE wording is identical everywhere.
 Reply errorFrom(const Status& status) {
   switch (status.code()) {
-    case ErrorCode::kWrongType:
-      return Reply::error(status.message());
-    case ErrorCode::kOutOfMemory:
-      return Reply::error("OOM " + status.message());
-    default:
-      return Reply::error("ERR " + status.message());
+    case ErrorCode::kWrongType: return Reply::error(status.message());
+    case ErrorCode::kOutOfMemory: return Reply::error("OOM " + status.message());
+    default: return Reply::error("ERR " + status.message());
   }
 }
 
@@ -49,8 +46,8 @@ Reply parseIntegerArgument(std::string_view text, std::int64_t& out) {
 
 void add(CommandRegistry& registry, std::string name, int arity, bool is_write, std::string summary,
          LambdaCommand::Handler handler, bool is_admin = false, bool is_no_auth = false) {
-  registry.registerCommand(std::make_unique<LambdaCommand>(std::move(name), arity, is_write, std::move(summary),
-                                                           std::move(handler), is_admin, is_no_auth));
+  registry.registerCommand(std::make_unique<LambdaCommand>(
+      std::move(name), arity, is_write, std::move(summary), std::move(handler), is_admin, is_no_auth));
 }
 
 // ---------------------------------------------------------------------------
@@ -65,8 +62,11 @@ void add(CommandRegistry& registry, std::string name, int arity, bool is_write, 
 class SetCommand final : public Command {
  public:
   [[nodiscard]] std::string_view name() const noexcept override { return "SET"; }
+
   [[nodiscard]] int arity() const noexcept override { return -3; }
+
   [[nodiscard]] bool isWrite() const noexcept override { return true; }
+
   [[nodiscard]] std::string_view summary() const noexcept override {
     return "SET key value [EX seconds|PX milliseconds] [NX|XX]";
   }
@@ -127,8 +127,12 @@ class SetCommand final : public Command {
 class SubscribeCommand final : public Command {
  public:
   [[nodiscard]] std::string_view name() const noexcept override { return "SUBSCRIBE"; }
+
   [[nodiscard]] int arity() const noexcept override { return -2; }
-  [[nodiscard]] std::string_view summary() const noexcept override { return "SUBSCRIBE channel [channel ...]"; }
+
+  [[nodiscard]] std::string_view summary() const noexcept override {
+    return "SUBSCRIBE channel [channel ...]";
+  }
 
   Reply execute(CommandContext& context, const std::vector<std::string>& argv) override {
     if (context.connection == nullptr) {
@@ -164,7 +168,9 @@ class SubscribeCommand final : public Command {
 class UnsubscribeCommand final : public Command {
  public:
   [[nodiscard]] std::string_view name() const noexcept override { return "UNSUBSCRIBE"; }
+
   [[nodiscard]] int arity() const noexcept override { return -1; }
+
   [[nodiscard]] std::string_view summary() const noexcept override { return "UNSUBSCRIBE [channel ...]"; }
 
   Reply execute(CommandContext& context, const std::vector<std::string>& argv) override {
@@ -222,7 +228,9 @@ class UnsubscribeCommand final : public Command {
 class InfoCommand final : public Command {
  public:
   [[nodiscard]] std::string_view name() const noexcept override { return "INFO"; }
+
   [[nodiscard]] int arity() const noexcept override { return -1; }
+
   [[nodiscard]] std::string_view summary() const noexcept override { return "INFO [section]"; }
 
   Reply execute(CommandContext& context, const std::vector<std::string>& /*argv*/) override {
@@ -444,7 +452,8 @@ void registerListCommands(CommandRegistry& registry) {
 
   add(registry, "LLEN", 2, false, "LLEN key", [](CommandContext& ctx, const std::vector<std::string>& argv) {
     Result<std::size_t> length = ctx.server.keyspace->listLength(argv[1]);
-    return length.ok() ? Reply::integer(static_cast<std::int64_t>(length.value())) : errorFrom(length.status());
+    return length.ok() ? Reply::integer(static_cast<std::int64_t>(length.value()))
+                       : errorFrom(length.status());
   });
 
   add(registry, "LRANGE", 4, false, "LRANGE key start stop",
@@ -476,7 +485,8 @@ void registerCollectionCommands(CommandRegistry& registry) {
           fields.emplace_back(argv[i], argv[i + 1]);
         }
         Result<std::size_t> added = ctx.server.keyspace->hashSet(argv[1], fields);
-        return added.ok() ? Reply::integer(static_cast<std::int64_t>(added.value())) : errorFrom(added.status());
+        return added.ok() ? Reply::integer(static_cast<std::int64_t>(added.value()))
+                          : errorFrom(added.status());
       });
 
   add(registry, "HGET", 3, false, "HGET key field",
@@ -514,14 +524,16 @@ void registerCollectionCommands(CommandRegistry& registry) {
 
   add(registry, "HLEN", 2, false, "HLEN key", [](CommandContext& ctx, const std::vector<std::string>& argv) {
     Result<std::size_t> length = ctx.server.keyspace->hashLength(argv[1]);
-    return length.ok() ? Reply::integer(static_cast<std::int64_t>(length.value())) : errorFrom(length.status());
+    return length.ok() ? Reply::integer(static_cast<std::int64_t>(length.value()))
+                       : errorFrom(length.status());
   });
 
   add(registry, "SADD", -3, true, "SADD key member [member ...]",
       [](CommandContext& ctx, const std::vector<std::string>& argv) {
         const std::vector<std::string> members(argv.begin() + 2, argv.end());
         Result<std::size_t> added = ctx.server.keyspace->setAdd(argv[1], members);
-        return added.ok() ? Reply::integer(static_cast<std::int64_t>(added.value())) : errorFrom(added.status());
+        return added.ok() ? Reply::integer(static_cast<std::int64_t>(added.value()))
+                          : errorFrom(added.status());
       });
 
   add(registry, "SREM", -3, true, "SREM key member [member ...]",
@@ -594,7 +606,8 @@ void registerPubSubCommands(CommandRegistry& registry) {
 void registerAdminCommands(CommandRegistry& registry) {
   registry.registerCommand(std::make_unique<InfoCommand>());
 
-  add(registry, "PING", -1, false, "PING [message]",
+  add(
+      registry, "PING", -1, false, "PING [message]",
       [](CommandContext&, const std::vector<std::string>& argv) {
         return argv.size() >= 2 ? Reply::bulkString(argv[1]) : Reply::simpleString("PONG");
       },
@@ -607,13 +620,16 @@ void registerAdminCommands(CommandRegistry& registry) {
     return Reply::integer(static_cast<std::int64_t>(ctx.server.keyspace->size()));
   });
 
-  add(registry, "FLUSHALL", -1, true, "FLUSHALL", [](CommandContext& ctx, const std::vector<std::string>&) {
-    ctx.server.keyspace->clear();
-    return Reply::ok();
-  },
+  add(
+      registry, "FLUSHALL", -1, true, "FLUSHALL",
+      [](CommandContext& ctx, const std::vector<std::string>&) {
+        ctx.server.keyspace->clear();
+        return Reply::ok();
+      },
       /*is_admin=*/true);
 
-  add(registry, "QUIT", 1, false, "QUIT",
+  add(
+      registry, "QUIT", 1, false, "QUIT",
       [](CommandContext&, const std::vector<std::string>&) { return Reply::ok(); },
       /*is_admin=*/false, /*is_no_auth=*/true);
 
@@ -622,7 +638,8 @@ void registerAdminCommands(CommandRegistry& registry) {
         return Reply::stringArray(registry.commandNames());
       });
 
-  add(registry, "CONFIG", -2, false, "CONFIG GET parameter [parameter ...]",
+  add(
+      registry, "CONFIG", -2, false, "CONFIG GET parameter [parameter ...]",
       [](CommandContext& ctx, const std::vector<std::string>& argv) {
         const std::string subcommand = toUpper(argv[1]);
         if (subcommand != "GET") {

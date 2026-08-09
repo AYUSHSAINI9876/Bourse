@@ -49,13 +49,12 @@ TEST(Sha256Test, HandlesTheLengthPaddingBoundaries) {
   // for the length, no room so an extra block is needed, and exactly full.
   // Getting this wrong produces a hash that is right for most inputs, which is
   // the worst possible failure mode.
-  for (const std::size_t length : {size_t{54}, size_t{55}, size_t{56}, size_t{63}, size_t{64},
-                                   size_t{65}, size_t{119}, size_t{120}, size_t{128}}) {
+  for (const std::size_t length : {size_t{54}, size_t{55}, size_t{56}, size_t{63}, size_t{64}, size_t{65},
+                                   size_t{119}, size_t{120}, size_t{128}}) {
     const std::string message = repeated('a', length);
     Sha256 streaming;
     streaming.update(message);
-    EXPECT_EQ(toHex(streaming.finish()), toHex(Sha256::hash(message)))
-        << "length " << length;
+    EXPECT_EQ(toHex(streaming.finish()), toHex(Sha256::hash(message))) << "length " << length;
   }
 }
 
@@ -85,9 +84,9 @@ TEST(HmacSha256Test, MatchesRfc4231Vectors) {
 
   // Test case 6: a key longer than the 64-byte block, which must be hashed
   // down first. Skipping that reduction is a classic HMAC bug.
-  EXPECT_EQ(toHex(hmacSha256(repeated('\xaa', 131),
-                             "Test Using Larger Than Block-Size Key - Hash Key First")),
-            "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54");
+  EXPECT_EQ(
+      toHex(hmacSha256(repeated('\xaa', 131), "Test Using Larger Than Block-Size Key - Hash Key First")),
+      "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54");
 }
 
 // ---------------------------------------------------------------------------
@@ -107,8 +106,8 @@ TEST(Pbkdf2Test, MatchesPublishedVectors) {
 TEST(Pbkdf2Test, DerivesLongerKeysAcrossMultipleBlocks) {
   // 40 bytes needs two SHA-256 blocks, exercising the block-index counter that
   // a single-block implementation never touches.
-  const std::vector<std::uint8_t> out = pbkdf2HmacSha256("passwordPASSWORDpassword",
-                                                         "saltSALTsaltSALTsaltSALTsaltSALTsalt", 4096, 40);
+  const std::vector<std::uint8_t> out =
+      pbkdf2HmacSha256("passwordPASSWORDpassword", "saltSALTsaltSALTsaltSALTsaltSALTsalt", 4096, 40);
   EXPECT_EQ(out.size(), 40u);
   EXPECT_EQ(toHex(out.data(), out.size()),
             "348c89dbcbd32b2f32d814b8116e84cf2b17347ebc1800181c4e2a1fb8dd53e1c635518c7dac47e9");
@@ -145,8 +144,8 @@ TEST(CryptoUtilTest, HexRoundTrips) {
 }
 
 TEST(CryptoUtilTest, RejectsMalformedHex) {
-  EXPECT_FALSE(fromHex("abc").ok());   // odd length
-  EXPECT_FALSE(fromHex("zz").ok());    // not hex
+  EXPECT_FALSE(fromHex("abc").ok());  // odd length
+  EXPECT_FALSE(fromHex("zz").ok());   // not hex
   EXPECT_TRUE(fromHex("").ok());
 }
 
@@ -627,8 +626,7 @@ TEST_F(AuthEnforcementTest, EveryRegisteredCommandHasADefensibleRequiredRole) {
     const Command* command = registry_->find(name);
     ASSERT_NE(command, nullptr) << name;
     if (command->requiredRole() == auth::Role::kAnonymous) {
-      EXPECT_NE(std::find(expected_public.begin(), expected_public.end(), name),
-                expected_public.end())
+      EXPECT_NE(std::find(expected_public.begin(), expected_public.end(), name), expected_public.end())
           << name << " is reachable without credentials; add it to the list above "
           << "deliberately or remove isNoAuth()";
     }

@@ -59,7 +59,9 @@ class ThreadPool {
 
     {
       std::unique_lock<std::mutex> lock(mutex_);
-      not_full_.wait(lock, [this] { return queue_.size() < max_queue_depth_ || !running_.load(std::memory_order_acquire); });
+      not_full_.wait(lock, [this] {
+        return queue_.size() < max_queue_depth_ || !running_.load(std::memory_order_acquire);
+      });
       if (!running_.load(std::memory_order_acquire)) {
         throw std::runtime_error("ThreadPool::submit on a stopped pool");
       }
@@ -120,7 +122,8 @@ class ThreadPool {
       std::function<void()> task;
       {
         std::unique_lock<std::mutex> lock(mutex_);
-        not_empty_.wait(lock, [this] { return !queue_.empty() || !running_.load(std::memory_order_acquire); });
+        not_empty_.wait(lock,
+                        [this] { return !queue_.empty() || !running_.load(std::memory_order_acquire); });
         if (queue_.empty()) {
           if (!running_.load(std::memory_order_acquire)) {
             return;

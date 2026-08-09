@@ -32,18 +32,23 @@ constexpr std::uint32_t rotr(std::uint32_t x, unsigned n) noexcept {
 constexpr std::uint32_t bigSigma0(std::uint32_t x) noexcept {
   return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22);
 }
+
 constexpr std::uint32_t bigSigma1(std::uint32_t x) noexcept {
   return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25);
 }
+
 constexpr std::uint32_t smallSigma0(std::uint32_t x) noexcept {
   return rotr(x, 7) ^ rotr(x, 18) ^ (x >> 3);
 }
+
 constexpr std::uint32_t smallSigma1(std::uint32_t x) noexcept {
   return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10);
 }
+
 constexpr std::uint32_t choose(std::uint32_t e, std::uint32_t f, std::uint32_t g) noexcept {
   return (e & f) ^ (~e & g);
 }
+
 constexpr std::uint32_t majority(std::uint32_t a, std::uint32_t b, std::uint32_t c) noexcept {
   return (a & b) ^ (a & c) ^ (b & c);
 }
@@ -85,9 +90,18 @@ void secureZero(void* data, std::size_t size) noexcept {
 }  // namespace
 
 bool parseRole(std::string_view text, Role& out) noexcept {
-  if (text == "viewer") { out = Role::kViewer; return true; }
-  if (text == "trader") { out = Role::kTrader; return true; }
-  if (text == "admin") { out = Role::kAdmin; return true; }
+  if (text == "viewer") {
+    out = Role::kViewer;
+    return true;
+  }
+  if (text == "trader") {
+    out = Role::kTrader;
+    return true;
+  }
+  if (text == "admin") {
+    out = Role::kAdmin;
+    return true;
+  }
   return false;
 }
 
@@ -116,12 +130,24 @@ void Sha256::compress(const std::uint8_t block[kBlockSize]) noexcept {
   for (int i = 0; i < 64; ++i) {
     const std::uint32_t t1 = h + bigSigma1(e) + choose(e, f, g) + kRoundConstants[i] + w[i];
     const std::uint32_t t2 = bigSigma0(a) + majority(a, b, c);
-    h = g; g = f; f = e; e = d + t1;
-    d = c; c = b; b = a; a = t1 + t2;
+    h = g;
+    g = f;
+    f = e;
+    e = d + t1;
+    d = c;
+    c = b;
+    b = a;
+    a = t1 + t2;
   }
 
-  state_[0] += a; state_[1] += b; state_[2] += c; state_[3] += d;
-  state_[4] += e; state_[5] += f; state_[6] += g; state_[7] += h;
+  state_[0] += a;
+  state_[1] += b;
+  state_[2] += c;
+  state_[3] += d;
+  state_[4] += e;
+  state_[5] += f;
+  state_[6] += g;
+  state_[7] += h;
 
   secureZero(w, sizeof(w));
 }
@@ -304,9 +330,12 @@ Result<std::string> fromHex(std::string_view hex) {
     return Status::invalidArgument("hex string has an odd length");
   }
   const auto nibble = [](char c) -> int {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= '0' && c <= '9')
+      return c - '0';
+    if (c >= 'a' && c <= 'f')
+      return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+      return c - 'A' + 10;
     return -1;
   };
   std::string out;
@@ -361,25 +390,32 @@ constexpr std::size_t kDerivedBytes = 32;
 bool splitEncoded(std::string_view encoded, std::string_view& algorithm, std::uint32_t& iterations,
                   std::string_view& salt_hex, std::string_view& hash_hex) noexcept {
   const std::size_t a = encoded.find('$');
-  if (a == std::string_view::npos) return false;
+  if (a == std::string_view::npos)
+    return false;
   const std::size_t b = encoded.find('$', a + 1);
-  if (b == std::string_view::npos) return false;
+  if (b == std::string_view::npos)
+    return false;
   const std::size_t c = encoded.find('$', b + 1);
-  if (c == std::string_view::npos) return false;
-  if (encoded.find('$', c + 1) != std::string_view::npos) return false;
+  if (c == std::string_view::npos)
+    return false;
+  if (encoded.find('$', c + 1) != std::string_view::npos)
+    return false;
 
   algorithm = encoded.substr(0, a);
   const std::string_view iterations_text = encoded.substr(a + 1, b - a - 1);
   salt_hex = encoded.substr(b + 1, c - b - 1);
   hash_hex = encoded.substr(c + 1);
 
-  if (iterations_text.empty() || iterations_text.size() > 9) return false;
+  if (iterations_text.empty() || iterations_text.size() > 9)
+    return false;
   std::uint32_t parsed = 0;
   for (const char ch : iterations_text) {
-    if (ch < '0' || ch > '9') return false;
+    if (ch < '0' || ch > '9')
+      return false;
     parsed = parsed * 10 + static_cast<std::uint32_t>(ch - '0');
   }
-  if (parsed == 0) return false;
+  if (parsed == 0)
+    return false;
   iterations = parsed;
   return true;
 }

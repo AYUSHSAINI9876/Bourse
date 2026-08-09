@@ -43,6 +43,7 @@ class Sha256 {
 
   void reset() noexcept;
   void update(const void* data, std::size_t size) noexcept;
+
   void update(std::string_view text) noexcept { update(text.data(), text.size()); }
 
   /// Finalises and returns the digest. The object is spent afterwards; call
@@ -70,7 +71,7 @@ class Sha256 {
 /// bytes. Cost is linear in iterations by design -- that is the entire point,
 /// and it is why `login` is rate-limited rather than left open.
 [[nodiscard]] std::vector<std::uint8_t> pbkdf2HmacSha256(std::string_view password, std::string_view salt,
-                                                        std::uint32_t iterations, std::size_t length);
+                                                         std::uint32_t iterations, std::size_t length);
 
 /// Compares without an early return.
 ///

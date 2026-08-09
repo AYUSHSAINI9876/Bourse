@@ -62,12 +62,11 @@ class BPlusTree {
               const std::function<bool(std::string_view, RecordId)>& visit);
 
   /// Visits every entry in the tree, in order.
-  Status forEach(const std::function<bool(std::string_view, RecordId)>& visit) {
-    return scan({}, {}, visit);
-  }
+  Status forEach(const std::function<bool(std::string_view, RecordId)>& visit) { return scan({}, {}, visit); }
 
   [[nodiscard]] Result<std::size_t> size();
   [[nodiscard]] Result<std::size_t> height();
+
   [[nodiscard]] bool empty() const { return disk_.rootPageId() == kInvalidPageId; }
 
   /// Walks the whole structure asserting the invariants: keys sorted within

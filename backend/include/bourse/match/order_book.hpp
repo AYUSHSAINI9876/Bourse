@@ -91,15 +91,21 @@ class OrderBook {
   [[nodiscard]] BookSnapshot snapshot(std::size_t depth = 10) const;
 
   [[nodiscard]] std::size_t restingOrderCount() const noexcept { return index_.size(); }
+
   [[nodiscard]] std::size_t bidLevelCount() const noexcept { return bids_.size(); }
+
   [[nodiscard]] std::size_t askLevelCount() const noexcept { return asks_.size(); }
+
   [[nodiscard]] SequenceNumber lastTradeSequence() const noexcept { return trade_sequence_; }
+
   [[nodiscard]] Quantity totalVolumeTraded() const noexcept { return total_volume_; }
+
   [[nodiscard]] std::optional<Price> lastTradePrice() const noexcept { return last_trade_price_; }
 
   /// Pool statistics, used by the benchmark to assert that steady-state order
   /// entry performs no allocation.
   [[nodiscard]] std::size_t poolChunkCount() const noexcept { return pool_.chunkCount(); }
+
   [[nodiscard]] std::size_t liveOrderObjects() const noexcept { return pool_.live(); }
 
  private:

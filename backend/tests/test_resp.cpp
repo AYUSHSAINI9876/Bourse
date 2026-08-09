@@ -160,8 +160,8 @@ TEST(Reply, EncodesEveryRespType) {
 }
 
 TEST(Reply, EncodesNestedArrays) {
-  const Reply reply = Reply::array({Reply::bulkString("a"), Reply::integer(2),
-                                    Reply::array({Reply::bulkString("nested")})});
+  const Reply reply =
+      Reply::array({Reply::bulkString("a"), Reply::integer(2), Reply::array({Reply::bulkString("nested")})});
   EXPECT_EQ(reply.toResp(), "*3\r\n$1\r\na\r\n:2\r\n*1\r\n$6\r\nnested\r\n");
 }
 

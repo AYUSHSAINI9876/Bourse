@@ -27,13 +27,19 @@ class Datum {
   Datum() = default;
 
   static Datum null() { return Datum{}; }
+
   static Datum integer(std::int64_t v) { return Datum(v); }
+
   static Datum real(double v) { return Datum(v); }
+
   static Datum text(std::string v) { return Datum(std::move(v)); }
+
   static Datum boolean(bool v) { return Datum(v); }
 
   [[nodiscard]] DatumType type() const noexcept;
+
   [[nodiscard]] bool isNull() const noexcept { return type() == DatumType::kNull; }
+
   [[nodiscard]] bool isNumeric() const noexcept {
     return type() == DatumType::kInteger || type() == DatumType::kReal;
   }
@@ -63,8 +69,11 @@ class Datum {
 
  private:
   explicit Datum(std::int64_t v) : data_(v) {}
+
   explicit Datum(double v) : data_(v) {}
+
   explicit Datum(std::string v) : data_(std::move(v)) {}
+
   explicit Datum(bool v) : data_(v) {}
 
   std::variant<std::monostate, std::int64_t, double, std::string, bool> data_;
@@ -77,9 +86,20 @@ using Row = std::vector<Datum>;
 // ---------------------------------------------------------------------------
 
 enum class BinaryOp : std::uint8_t {
-  kAdd, kSubtract, kMultiply, kDivide, kModulo,
-  kEqual, kNotEqual, kLess, kLessEqual, kGreater, kGreaterEqual,
-  kAnd, kOr, kLike,
+  kAdd,
+  kSubtract,
+  kMultiply,
+  kDivide,
+  kModulo,
+  kEqual,
+  kNotEqual,
+  kLess,
+  kLessEqual,
+  kGreater,
+  kGreaterEqual,
+  kAnd,
+  kOr,
+  kLike,
 };
 
 enum class UnaryOp : std::uint8_t { kNegate, kNot, kIsNull, kIsNotNull };
@@ -120,7 +140,9 @@ using ExpressionPtr = std::unique_ptr<Expression>;
 class LiteralExpr final : public Expression {
  public:
   explicit LiteralExpr(Datum value) : value_(std::move(value)) {}
+
   void accept(ExpressionVisitor& visitor) const override { visitor.visit(*this); }
+
   [[nodiscard]] const Datum& value() const noexcept { return value_; }
 
  private:
@@ -130,7 +152,9 @@ class LiteralExpr final : public Expression {
 class ColumnExpr final : public Expression {
  public:
   explicit ColumnExpr(std::string name) : name_(std::move(name)) {}
+
   void accept(ExpressionVisitor& visitor) const override { visitor.visit(*this); }
+
   [[nodiscard]] const std::string& name() const noexcept { return name_; }
 
  private:
@@ -141,9 +165,13 @@ class BinaryExpr final : public Expression {
  public:
   BinaryExpr(BinaryOp op, ExpressionPtr left, ExpressionPtr right)
       : op_(op), left_(std::move(left)), right_(std::move(right)) {}
+
   void accept(ExpressionVisitor& visitor) const override { visitor.visit(*this); }
+
   [[nodiscard]] BinaryOp op() const noexcept { return op_; }
+
   [[nodiscard]] const Expression& left() const noexcept { return *left_; }
+
   [[nodiscard]] const Expression& right() const noexcept { return *right_; }
 
  private:
@@ -155,8 +183,11 @@ class BinaryExpr final : public Expression {
 class UnaryExpr final : public Expression {
  public:
   UnaryExpr(UnaryOp op, ExpressionPtr operand) : op_(op), operand_(std::move(operand)) {}
+
   void accept(ExpressionVisitor& visitor) const override { visitor.visit(*this); }
+
   [[nodiscard]] UnaryOp op() const noexcept { return op_; }
+
   [[nodiscard]] const Expression& operand() const noexcept { return *operand_; }
 
  private:
@@ -211,7 +242,7 @@ struct SelectStatement {
   std::string table;
   ExpressionPtr where;
   std::vector<OrderByItem> order_by;
-  std::int64_t limit = -1;   ///< -1 = unlimited
+  std::int64_t limit = -1;  ///< -1 = unlimited
   std::int64_t offset = 0;
 };
 
@@ -226,7 +257,7 @@ struct DeleteStatement {
   ExpressionPtr where;
 };
 
-using Statement = std::variant<CreateTableStatement, DropTableStatement, InsertStatement,
-                               SelectStatement, UpdateStatement, DeleteStatement>;
+using Statement = std::variant<CreateTableStatement, DropTableStatement, InsertStatement, SelectStatement,
+                               UpdateStatement, DeleteStatement>;
 
 }  // namespace bourse::sql

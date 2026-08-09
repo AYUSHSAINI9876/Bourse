@@ -32,10 +32,15 @@ class Reply {
   Reply() : kind_(Kind::kNull) {}
 
   static Reply simpleString(std::string text) { return Reply(Kind::kSimpleString, std::move(text)); }
+
   static Reply error(std::string text) { return Reply(Kind::kError, std::move(text)); }
+
   static Reply bulkString(std::string text) { return Reply(Kind::kBulkString, std::move(text)); }
+
   static Reply null() { return Reply(Kind::kNull, {}); }
+
   static Reply nullArray() { return Reply(Kind::kNullArray, {}); }
+
   static Reply ok() { return simpleString("OK"); }
 
   static Reply integer(std::int64_t value) {
@@ -60,9 +65,13 @@ class Reply {
   }
 
   [[nodiscard]] Kind kind() const noexcept { return kind_; }
+
   [[nodiscard]] const std::string& text() const noexcept { return text_; }
+
   [[nodiscard]] std::int64_t integerValue() const noexcept { return integer_; }
+
   [[nodiscard]] const std::vector<Reply>& elements() const noexcept { return elements_; }
+
   [[nodiscard]] bool isError() const noexcept { return kind_ == Kind::kError; }
 
   /// Appends the RESP2 encoding to `out`.

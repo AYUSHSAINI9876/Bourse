@@ -28,8 +28,7 @@ TEST(HttpParser, ParsesAMinimalRequest) {
 }
 
 TEST(HttpParser, HeaderLookupIsCaseInsensitive) {
-  const HttpParseResult parsed =
-      parseHttpRequest("GET / HTTP/1.1\r\ncontent-type: application/json\r\n\r\n");
+  const HttpParseResult parsed = parseHttpRequest("GET / HTTP/1.1\r\ncontent-type: application/json\r\n\r\n");
   ASSERT_EQ(parsed.status, HttpParseStatus::kSuccess);
   EXPECT_EQ(parsed.request.header("Content-Type"), "application/json");
   EXPECT_EQ(parsed.request.header("CONTENT-TYPE"), "application/json");
@@ -88,8 +87,7 @@ TEST(HttpParser, PercentDecodesPathsAndKeepsEncodedSeparatorsInValues) {
 }
 
 TEST(HttpParser, HonoursConnectionClose) {
-  const HttpParseResult closed =
-      parseHttpRequest("GET / HTTP/1.1\r\nConnection: close\r\n\r\n");
+  const HttpParseResult closed = parseHttpRequest("GET / HTTP/1.1\r\nConnection: close\r\n\r\n");
   ASSERT_EQ(closed.status, HttpParseStatus::kSuccess);
   EXPECT_FALSE(closed.request.keep_alive);
 
@@ -122,8 +120,8 @@ TEST(HttpParser, RejectsMalformedAndUnsupportedRequests) {
 }
 
 TEST(HttpParser, DetectsWebSocketUpgradeIntent) {
-  const HttpParseResult parsed = parseHttpRequest(
-      "GET /ws HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
+  const HttpParseResult parsed =
+      parseHttpRequest("GET /ws HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
   ASSERT_EQ(parsed.status, HttpParseStatus::kSuccess);
   EXPECT_TRUE(parsed.request.wantsWebSocketUpgrade());
   EXPECT_FALSE(parseHttpRequest("GET / HTTP/1.1\r\n\r\n").request.wantsWebSocketUpgrade());
@@ -221,7 +219,8 @@ TEST(RouterTest, ExtractsPathParameters) {
 
 TEST(RouterTest, DistinguishesMissingPathFromWrongMethod) {
   Router router;
-  router.get("/thing", [](const HttpRequest&, HttpResponse& response) { response = HttpResponse::text("x"); });
+  router.get("/thing",
+             [](const HttpRequest&, HttpResponse& response) { response = HttpResponse::text("x"); });
 
   HttpRequest missing = makeRequest("GET", "/nothing");
   HttpResponse response_missing;
@@ -238,7 +237,8 @@ TEST(RouterTest, DistinguishesMissingPathFromWrongMethod) {
 
 TEST(RouterTest, DoesNotMatchOnSegmentCount) {
   Router router;
-  router.get("/a/:id", [](const HttpRequest&, HttpResponse& response) { response = HttpResponse::text("x"); });
+  router.get("/a/:id",
+             [](const HttpRequest&, HttpResponse& response) { response = HttpResponse::text("x"); });
 
   HttpRequest too_long = makeRequest("GET", "/a/b/c");
   HttpResponse response;

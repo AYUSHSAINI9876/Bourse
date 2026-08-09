@@ -37,33 +37,45 @@ class ByteBuffer {
       : storage_(kDefaultPrepend + initial_capacity), read_(kDefaultPrepend), write_(kDefaultPrepend) {}
 
   [[nodiscard]] std::size_t readable() const noexcept { return write_ - read_; }
+
   [[nodiscard]] std::size_t writable() const noexcept { return storage_.size() - write_; }
+
   [[nodiscard]] std::size_t prependable() const noexcept { return read_; }
+
   [[nodiscard]] bool empty() const noexcept { return readable() == 0; }
+
   [[nodiscard]] std::size_t capacity() const noexcept { return storage_.size(); }
 
   [[nodiscard]] const char* peek() const noexcept { return storage_.data() + read_; }
+
   [[nodiscard]] char* beginWrite() noexcept { return storage_.data() + write_; }
+
   [[nodiscard]] const char* beginWrite() const noexcept { return storage_.data() + write_; }
 
   /// Zero-copy view of the unread region. Invalidated by any mutating call.
   [[nodiscard]] std::string_view view() const noexcept { return {peek(), readable()}; }
 
   void append(const char* data, std::size_t len);
+
   void append(std::string_view data) { append(data.data(), data.size()); }
+
   void appendByte(char c) { append(&c, 1); }
 
   void ensureWritable(std::size_t len);
+
   void hasWritten(std::size_t len) noexcept { write_ += len; }
+
   void unwrite(std::size_t len) noexcept { write_ -= len; }
 
   void retrieve(std::size_t len) noexcept;
   void retrieveAll() noexcept;
   [[nodiscard]] std::string retrieveAsString(std::size_t len);
+
   [[nodiscard]] std::string retrieveAllAsString() { return retrieveAsString(readable()); }
 
   /// Returns the offset of `needle` within the readable region, or npos.
   [[nodiscard]] std::size_t find(std::string_view needle, std::size_t from = 0) const noexcept;
+
   [[nodiscard]] std::size_t findCRLF(std::size_t from = 0) const noexcept { return find("\r\n", from); }
 
   static constexpr std::size_t npos = static_cast<std::size_t>(-1);

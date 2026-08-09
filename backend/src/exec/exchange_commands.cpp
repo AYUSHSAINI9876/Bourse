@@ -21,7 +21,9 @@ using match::Side;
 using match::TimeInForce;
 using match::Trade;
 
-Reply noEngine() { return Reply::error("ERR matching engine is not enabled on this server"); }
+Reply noEngine() {
+  return Reply::error("ERR matching engine is not enabled on this server");
+}
 
 std::string normaliseSymbol(std::string_view raw) {
   std::string out;
@@ -34,11 +36,16 @@ std::string normaliseSymbol(std::string_view raw) {
 
 Reply encodeTrade(const Trade& trade) {
   return Reply::array({
-      Reply::bulkString("sequence"), Reply::integer(static_cast<std::int64_t>(trade.sequence)),
-      Reply::bulkString("price"), Reply::bulkString(match::formatPrice(trade.price)),
-      Reply::bulkString("quantity"), Reply::integer(trade.quantity),
-      Reply::bulkString("aggressor"), Reply::bulkString(match::toString(trade.aggressor_side)),
-      Reply::bulkString("resting_order"), Reply::integer(static_cast<std::int64_t>(trade.resting_order_id)),
+      Reply::bulkString("sequence"),
+      Reply::integer(static_cast<std::int64_t>(trade.sequence)),
+      Reply::bulkString("price"),
+      Reply::bulkString(match::formatPrice(trade.price)),
+      Reply::bulkString("quantity"),
+      Reply::integer(trade.quantity),
+      Reply::bulkString("aggressor"),
+      Reply::bulkString(match::toString(trade.aggressor_side)),
+      Reply::bulkString("resting_order"),
+      Reply::integer(static_cast<std::int64_t>(trade.resting_order_id)),
       Reply::bulkString("aggressing_order"),
       Reply::integer(static_cast<std::int64_t>(trade.aggressing_order_id)),
   });
@@ -52,12 +59,12 @@ Reply encodeReport(const ExecutionReport& report) {
   }
 
   std::vector<Reply> fields = {
-      Reply::bulkString("order_id"), Reply::integer(static_cast<std::int64_t>(report.order_id)),
-      Reply::bulkString("status"),   Reply::bulkString(match::toString(report.status)),
-      Reply::bulkString("filled"),   Reply::integer(report.filled),
+      Reply::bulkString("order_id"),  Reply::integer(static_cast<std::int64_t>(report.order_id)),
+      Reply::bulkString("status"),    Reply::bulkString(match::toString(report.status)),
+      Reply::bulkString("filled"),    Reply::integer(report.filled),
       Reply::bulkString("remaining"), Reply::integer(report.remaining),
       Reply::bulkString("avg_price"), Reply::bulkString(match::formatPrice(report.average_price)),
-      Reply::bulkString("trades"),   Reply::array(std::move(trades)),
+      Reply::bulkString("trades"),    Reply::array(std::move(trades)),
   };
   if (!report.reject_reason.empty()) {
     fields.push_back(Reply::bulkString("reason"));
@@ -71,17 +78,20 @@ Reply encodeSnapshot(const BookSnapshot& snapshot) {
     std::vector<Reply> out;
     out.reserve(levels.size());
     for (const match::DepthLevel& level : levels) {
-      out.push_back(Reply::array({Reply::bulkString(match::formatPrice(level.price)),
-                                  Reply::integer(level.quantity),
-                                  Reply::integer(static_cast<std::int64_t>(level.orders))}));
+      out.push_back(
+          Reply::array({Reply::bulkString(match::formatPrice(level.price)), Reply::integer(level.quantity),
+                        Reply::integer(static_cast<std::int64_t>(level.orders))}));
     }
     return Reply::array(std::move(out));
   };
 
   return Reply::array({
-      Reply::bulkString("symbol"), Reply::bulkString(snapshot.symbol),
-      Reply::bulkString("bids"),   side(snapshot.bids),
-      Reply::bulkString("asks"),   side(snapshot.asks),
+      Reply::bulkString("symbol"),
+      Reply::bulkString(snapshot.symbol),
+      Reply::bulkString("bids"),
+      side(snapshot.bids),
+      Reply::bulkString("asks"),
+      side(snapshot.asks),
   });
 }
 
@@ -99,8 +109,11 @@ void add(CommandRegistry& registry, std::string name, int arity, bool is_write, 
 class OrderCommand final : public Command {
  public:
   [[nodiscard]] std::string_view name() const noexcept override { return "ORDER"; }
+
   [[nodiscard]] int arity() const noexcept override { return -5; }
+
   [[nodiscard]] bool isWrite() const noexcept override { return true; }
+
   [[nodiscard]] std::string_view summary() const noexcept override {
     return "ORDER symbol BUY|SELL LIMIT|MARKET quantity [price] [GTC|IOC|FOK]";
   }
@@ -202,8 +215,9 @@ void registerExchangeCommands(CommandRegistry& registry) {
           return Reply::error("ERR quantity must be a positive integer");
         }
         bool found = false;
-        const ExecutionReport report = engine->amend(
-            normaliseSymbol(argv[1]), static_cast<match::OrderId>(id.value()), price, quantity.value(), &found);
+        const ExecutionReport report =
+            engine->amend(normaliseSymbol(argv[1]), static_cast<match::OrderId>(id.value()), price,
+                          quantity.value(), &found);
         if (!found) {
           return Reply::integer(0);
         }
@@ -252,38 +266,37 @@ void registerExchangeCommands(CommandRegistry& registry) {
         return Reply::array(std::move(out));
       });
 
-  add(registry, "SYMBOLS", 1, false, "SYMBOLS",
-      [](CommandContext& ctx, const std::vector<std::string>&) {
-        MatchingEngine* engine = ctx.server.matching_engine;
-        if (engine == nullptr) {
-          return noEngine();
-        }
-        return Reply::stringArray(engine->symbols());
-      });
+  add(registry, "SYMBOLS", 1, false, "SYMBOLS", [](CommandContext& ctx, const std::vector<std::string>&) {
+    MatchingEngine* engine = ctx.server.matching_engine;
+    if (engine == nullptr) {
+      return noEngine();
+    }
+    return Reply::stringArray(engine->symbols());
+  });
 
-  add(registry, "EXCHANGE", 1, false, "EXCHANGE",
-      [](CommandContext& ctx, const std::vector<std::string>&) {
-        MatchingEngine* engine = ctx.server.matching_engine;
-        if (engine == nullptr) {
-          return noEngine();
-        }
-        const match::EngineStats stats = engine->stats();
-        return Reply::array({
-            Reply::bulkString("orders_accepted"),
-            Reply::integer(static_cast<std::int64_t>(stats.orders_accepted)),
-            Reply::bulkString("orders_rejected"),
-            Reply::integer(static_cast<std::int64_t>(stats.orders_rejected)),
-            Reply::bulkString("orders_cancelled"),
-            Reply::integer(static_cast<std::int64_t>(stats.orders_cancelled)),
-            Reply::bulkString("trades_executed"),
-            Reply::integer(static_cast<std::int64_t>(stats.trades_executed)),
-            Reply::bulkString("volume_traded"),
-            Reply::integer(static_cast<std::int64_t>(stats.volume_traded)),
-            Reply::bulkString("symbols"), Reply::integer(static_cast<std::int64_t>(stats.symbols)),
-            Reply::bulkString("resting_orders"),
-            Reply::integer(static_cast<std::int64_t>(stats.resting_orders)),
-        });
-      });
+  add(registry, "EXCHANGE", 1, false, "EXCHANGE", [](CommandContext& ctx, const std::vector<std::string>&) {
+    MatchingEngine* engine = ctx.server.matching_engine;
+    if (engine == nullptr) {
+      return noEngine();
+    }
+    const match::EngineStats stats = engine->stats();
+    return Reply::array({
+        Reply::bulkString("orders_accepted"),
+        Reply::integer(static_cast<std::int64_t>(stats.orders_accepted)),
+        Reply::bulkString("orders_rejected"),
+        Reply::integer(static_cast<std::int64_t>(stats.orders_rejected)),
+        Reply::bulkString("orders_cancelled"),
+        Reply::integer(static_cast<std::int64_t>(stats.orders_cancelled)),
+        Reply::bulkString("trades_executed"),
+        Reply::integer(static_cast<std::int64_t>(stats.trades_executed)),
+        Reply::bulkString("volume_traded"),
+        Reply::integer(static_cast<std::int64_t>(stats.volume_traded)),
+        Reply::bulkString("symbols"),
+        Reply::integer(static_cast<std::int64_t>(stats.symbols)),
+        Reply::bulkString("resting_orders"),
+        Reply::integer(static_cast<std::int64_t>(stats.resting_orders)),
+    });
+  });
 }
 
 }  // namespace bourse::exec

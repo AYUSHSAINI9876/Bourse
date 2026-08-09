@@ -42,7 +42,9 @@ class File {
   static Result<File> open(const std::string& path, Mode mode);
 
   [[nodiscard]] bool isOpen() const noexcept { return fd_ >= 0; }
+
   [[nodiscard]] int fd() const noexcept { return fd_; }
+
   [[nodiscard]] const std::string& path() const noexcept { return path_; }
 
   /// Reads exactly `n` bytes, retrying short reads. A read that hits EOF early

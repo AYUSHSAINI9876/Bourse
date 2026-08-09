@@ -27,10 +27,12 @@ class TempDir {
              std::to_string(reinterpret_cast<std::uintptr_t>(this)));
     std::filesystem::create_directories(path_);
   }
+
   ~TempDir() {
     std::error_code ec;
     std::filesystem::remove_all(path_, ec);
   }
+
   TempDir(const TempDir&) = delete;
   TempDir& operator=(const TempDir&) = delete;
 
@@ -143,7 +145,7 @@ TEST(WriteAheadLog, TruncatesATornTailAndKeepsGoing) {
     // reads past the end of the literal. AddressSanitizer caught precisely
     // that here.
     std::string garbage;
-    garbage.append("BOUR");                // magic
+    garbage.append("BOUR");                 // magic
     garbage.append("\xff\xff\x00\x00", 4);  // length prefix
     garbage.append("\x11\x22\x33\x44", 4);  // checksum
     garbage.append("partial");              // truncated payload
@@ -154,8 +156,7 @@ TEST(WriteAheadLog, TruncatesATornTailAndKeepsGoing) {
   ASSERT_TRUE(reopened.ok());
   std::size_t seen = 0;
   std::uint64_t truncated = 0;
-  Result<std::size_t> count =
-      reopened.value()->replay([&](const WalRecord&) { ++seen; }, &truncated);
+  Result<std::size_t> count = reopened.value()->replay([&](const WalRecord&) { ++seen; }, &truncated);
   ASSERT_TRUE(count.ok()) << count.status().toString();
   EXPECT_EQ(seen, 2u) << "committed records were lost";
   EXPECT_GT(truncated, 0u) << "the torn tail was not detected";

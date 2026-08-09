@@ -10,7 +10,9 @@ const Token& Parser::peek(std::size_t lookahead) const {
   return tokens_[index];
 }
 
-const Token& Parser::previous() const { return tokens_[cursor_ == 0 ? 0 : cursor_ - 1]; }
+const Token& Parser::previous() const {
+  return tokens_[cursor_ == 0 ? 0 : cursor_ - 1];
+}
 
 const Token& Parser::advance() {
   if (!atEnd()) {
@@ -19,7 +21,9 @@ const Token& Parser::advance() {
   return previous();
 }
 
-bool Parser::atEnd() const { return peek().type == TokenType::kEndOfInput; }
+bool Parser::atEnd() const {
+  return peek().type == TokenType::kEndOfInput;
+}
 
 bool Parser::matchKeyword(std::string_view word) {
   if (peek().isKeyword(word)) {
@@ -360,17 +364,50 @@ int Parser::precedenceOf(const Token& token, BinaryOp& op) {
     return 0;
   }
 
-  if (token.text == "=") { op = BinaryOp::kEqual; return kPrecedenceComparison; }
-  if (token.text == "!=") { op = BinaryOp::kNotEqual; return kPrecedenceComparison; }
-  if (token.text == "<") { op = BinaryOp::kLess; return kPrecedenceComparison; }
-  if (token.text == "<=") { op = BinaryOp::kLessEqual; return kPrecedenceComparison; }
-  if (token.text == ">") { op = BinaryOp::kGreater; return kPrecedenceComparison; }
-  if (token.text == ">=") { op = BinaryOp::kGreaterEqual; return kPrecedenceComparison; }
-  if (token.text == "+") { op = BinaryOp::kAdd; return kPrecedenceAdditive; }
-  if (token.text == "-") { op = BinaryOp::kSubtract; return kPrecedenceAdditive; }
-  if (token.text == "*") { op = BinaryOp::kMultiply; return kPrecedenceMultiplicative; }
-  if (token.text == "/") { op = BinaryOp::kDivide; return kPrecedenceMultiplicative; }
-  if (token.text == "%") { op = BinaryOp::kModulo; return kPrecedenceMultiplicative; }
+  if (token.text == "=") {
+    op = BinaryOp::kEqual;
+    return kPrecedenceComparison;
+  }
+  if (token.text == "!=") {
+    op = BinaryOp::kNotEqual;
+    return kPrecedenceComparison;
+  }
+  if (token.text == "<") {
+    op = BinaryOp::kLess;
+    return kPrecedenceComparison;
+  }
+  if (token.text == "<=") {
+    op = BinaryOp::kLessEqual;
+    return kPrecedenceComparison;
+  }
+  if (token.text == ">") {
+    op = BinaryOp::kGreater;
+    return kPrecedenceComparison;
+  }
+  if (token.text == ">=") {
+    op = BinaryOp::kGreaterEqual;
+    return kPrecedenceComparison;
+  }
+  if (token.text == "+") {
+    op = BinaryOp::kAdd;
+    return kPrecedenceAdditive;
+  }
+  if (token.text == "-") {
+    op = BinaryOp::kSubtract;
+    return kPrecedenceAdditive;
+  }
+  if (token.text == "*") {
+    op = BinaryOp::kMultiply;
+    return kPrecedenceMultiplicative;
+  }
+  if (token.text == "/") {
+    op = BinaryOp::kDivide;
+    return kPrecedenceMultiplicative;
+  }
+  if (token.text == "%") {
+    op = BinaryOp::kModulo;
+    return kPrecedenceMultiplicative;
+  }
   return 0;
 }
 
@@ -418,8 +455,8 @@ Result<ExpressionPtr> Parser::parsePostfix(ExpressionPtr operand) {
   if (matchKeyword("IS")) {
     const bool negated = matchKeyword("NOT");
     BOURSE_TRY(expectKeyword("NULL"));
-    return ExpressionPtr{std::make_unique<UnaryExpr>(negated ? UnaryOp::kIsNotNull : UnaryOp::kIsNull,
-                                                     std::move(operand))};
+    return ExpressionPtr{
+        std::make_unique<UnaryExpr>(negated ? UnaryOp::kIsNotNull : UnaryOp::kIsNull, std::move(operand))};
   }
   return operand;
 }

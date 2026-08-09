@@ -27,9 +27,13 @@ std::string upper(std::string_view text) {
 // enum and price helpers
 // ---------------------------------------------------------------------------
 
-const char* toString(Side side) noexcept { return side == Side::kBuy ? "BUY" : "SELL"; }
+const char* toString(Side side) noexcept {
+  return side == Side::kBuy ? "BUY" : "SELL";
+}
 
-const char* toString(OrderType type) noexcept { return type == OrderType::kLimit ? "LIMIT" : "MARKET"; }
+const char* toString(OrderType type) noexcept {
+  return type == OrderType::kLimit ? "LIMIT" : "MARKET";
+}
 
 const char* toString(TimeInForce tif) noexcept {
   switch (tif) {

@@ -33,9 +33,12 @@ std::string lower(std::string_view text) {
 }
 
 int hexDigit(char c) {
-  if (c >= '0' && c <= '9') return c - '0';
-  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  if (c >= '0' && c <= '9')
+    return c - '0';
+  if (c >= 'a' && c <= 'f')
+    return c - 'a' + 10;
+  if (c >= 'A' && c <= 'F')
+    return c - 'A' + 10;
   return -1;
 }
 
@@ -73,7 +76,8 @@ std::string HttpRequest::pathParam(const std::string& name, std::string_view fal
 }
 
 bool HttpRequest::wantsWebSocketUpgrade() const {
-  return lower(header("Upgrade")) == "websocket" && lower(header("Connection")).find("upgrade") != std::string::npos;
+  return lower(header("Upgrade")) == "websocket" &&
+         lower(header("Connection")).find("upgrade") != std::string::npos;
 }
 
 // ---------------------------------------------------------------------------
@@ -223,8 +227,7 @@ std::map<std::string, std::string> parseQueryString(std::string_view query) {
 namespace {
 
 void skipJsonWhitespace(std::string_view text, std::size_t& i) noexcept {
-  while (i < text.size() &&
-         (text[i] == ' ' || text[i] == '\t' || text[i] == '\n' || text[i] == '\r')) {
+  while (i < text.size() && (text[i] == ' ' || text[i] == '\t' || text[i] == '\n' || text[i] == '\r')) {
     ++i;
   }
 }
@@ -290,14 +293,38 @@ bool parseJsonString(std::string_view text, std::size_t& i, std::string& out) {
         return false;
       }
       switch (text[i]) {
-        case '"': out.push_back('"'); ++i; break;
-        case '\\': out.push_back('\\'); ++i; break;
-        case '/': out.push_back('/'); ++i; break;
-        case 'b': out.push_back('\b'); ++i; break;
-        case 'f': out.push_back('\f'); ++i; break;
-        case 'n': out.push_back('\n'); ++i; break;
-        case 'r': out.push_back('\r'); ++i; break;
-        case 't': out.push_back('\t'); ++i; break;
+        case '"':
+          out.push_back('"');
+          ++i;
+          break;
+        case '\\':
+          out.push_back('\\');
+          ++i;
+          break;
+        case '/':
+          out.push_back('/');
+          ++i;
+          break;
+        case 'b':
+          out.push_back('\b');
+          ++i;
+          break;
+        case 'f':
+          out.push_back('\f');
+          ++i;
+          break;
+        case 'n':
+          out.push_back('\n');
+          ++i;
+          break;
+        case 'r':
+          out.push_back('\r');
+          ++i;
+          break;
+        case 't':
+          out.push_back('\t');
+          ++i;
+          break;
         case 'u': {
           std::uint32_t code = 0;
           if (!parseHex4(text, i + 1, code)) {
@@ -320,8 +347,7 @@ bool parseJsonString(std::string_view text, std::size_t& i, std::string& out) {
           appendUtf8(out, code);
           break;
         }
-        default:
-          return false;
+        default: return false;
       }
       continue;
     }
@@ -367,8 +393,8 @@ bool skipJsonValue(std::string_view text, std::size_t& i) {
     } else {
       // Number, true, false or null -- consume the run of value characters.
       const std::size_t start = i;
-      while (i < text.size() && text[i] != ',' && text[i] != '}' && text[i] != ']' &&
-             text[i] != ' ' && text[i] != '\t' && text[i] != '\n' && text[i] != '\r') {
+      while (i < text.size() && text[i] != ',' && text[i] != '}' && text[i] != ']' && text[i] != ' ' &&
+             text[i] != '\t' && text[i] != '\n' && text[i] != '\r') {
         ++i;
       }
       if (i == start) {

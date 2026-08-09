@@ -38,8 +38,8 @@ void Histogram::record(std::uint64_t value) noexcept {
   // Compare-and-swap loop for max. Contended only while a new maximum is
   // actually being established, which is rare after warm-up.
   std::uint64_t current_max = max_.load(std::memory_order_relaxed);
-  while (value > current_max &&
-         !max_.compare_exchange_weak(current_max, value, std::memory_order_relaxed, std::memory_order_relaxed)) {
+  while (value > current_max && !max_.compare_exchange_weak(current_max, value, std::memory_order_relaxed,
+                                                            std::memory_order_relaxed)) {
   }
 }
 
@@ -175,7 +175,8 @@ std::string MetricsRegistry::renderJson() const {
   out << "\"counters\":{";
   bool first = true;
   for (const auto& [name, counter] : counters_) {
-    if (!first) out << ',';
+    if (!first)
+      out << ',';
     first = false;
     out << '"' << name << "\":" << counter->value();
   }
@@ -184,7 +185,8 @@ std::string MetricsRegistry::renderJson() const {
   out << "\"gauges\":{";
   first = true;
   for (const auto& [name, gauge] : gauges_) {
-    if (!first) out << ',';
+    if (!first)
+      out << ',';
     first = false;
     out << '"' << name << "\":" << gauge->value();
   }
@@ -193,18 +195,14 @@ std::string MetricsRegistry::renderJson() const {
   out << "\"histograms\":{";
   first = true;
   for (const auto& [name, histogram] : histograms_) {
-    if (!first) out << ',';
+    if (!first)
+      out << ',';
     first = false;
     const Histogram::Snapshot s = histogram->snapshot();
     out << '"' << name << "\":{"
-        << "\"count\":" << s.count << ','
-        << "\"min\":" << s.min << ','
-        << "\"max\":" << s.max << ','
-        << "\"mean\":" << s.mean << ','
-        << "\"p50\":" << s.p50 << ','
-        << "\"p90\":" << s.p90 << ','
-        << "\"p99\":" << s.p99 << ','
-        << "\"p999\":" << s.p999 << '}';
+        << "\"count\":" << s.count << ',' << "\"min\":" << s.min << ',' << "\"max\":" << s.max << ','
+        << "\"mean\":" << s.mean << ',' << "\"p50\":" << s.p50 << ',' << "\"p90\":" << s.p90 << ','
+        << "\"p99\":" << s.p99 << ',' << "\"p999\":" << s.p999 << '}';
   }
   out << '}';
 

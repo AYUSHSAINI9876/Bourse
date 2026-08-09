@@ -9,12 +9,11 @@ namespace {
 
 const std::unordered_set<std::string>& keywordSet() {
   static const std::unordered_set<std::string> keywords = {
-      "SELECT", "FROM",   "WHERE",  "INSERT", "INTO",   "VALUES", "UPDATE", "SET",
-      "DELETE", "CREATE", "TABLE",  "DROP",   "IF",     "NOT",    "EXISTS", "AND",
-      "OR",     "NULL",   "IS",     "ORDER",  "BY",     "ASC",    "DESC",   "LIMIT",
-      "OFFSET", "AS",     "PRIMARY", "KEY",   "TRUE",   "FALSE",  "LIKE",   "DISTINCT",
-      "INT",    "INTEGER", "BIGINT", "TEXT",  "VARCHAR", "REAL",  "FLOAT",  "DOUBLE",
-      "BOOL",   "BOOLEAN", "CHAR",  "STRING",
+      "SELECT",  "FROM",  "WHERE", "INSERT", "INTO",     "VALUES",  "UPDATE",  "SET",    "DELETE",
+      "CREATE",  "TABLE", "DROP",  "IF",     "NOT",      "EXISTS",  "AND",     "OR",     "NULL",
+      "IS",      "ORDER", "BY",    "ASC",    "DESC",     "LIMIT",   "OFFSET",  "AS",     "PRIMARY",
+      "KEY",     "TRUE",  "FALSE", "LIKE",   "DISTINCT", "INT",     "INTEGER", "BIGINT", "TEXT",
+      "VARCHAR", "REAL",  "FLOAT", "DOUBLE", "BOOL",     "BOOLEAN", "CHAR",    "STRING",
   };
   return keywords;
 }

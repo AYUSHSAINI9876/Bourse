@@ -74,6 +74,7 @@ class AuthService {
   explicit AuthService(AuthConfig config = {});
 
   [[nodiscard]] bool enabled() const noexcept { return config_.enabled; }
+
   [[nodiscard]] const AuthConfig& config() const noexcept { return config_; }
 
   // -- users -------------------------------------------------------------
@@ -100,8 +101,7 @@ class AuthService {
   /// `client_id` is whatever identifies the caller for rate limiting -- a peer
   /// address for RESP, `X-Forwarded-For` or the socket address for HTTP. It is
   /// only used for throttling.
-  Result<LoginResult> login(std::string_view username, std::string_view password,
-                            std::string_view client_id);
+  Result<LoginResult> login(std::string_view username, std::string_view password, std::string_view client_id);
 
   /// Credential check with no token issued, for RESP `AUTH`, where the
   /// connection itself carries the authenticated state.

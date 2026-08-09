@@ -43,7 +43,8 @@ class EvictionPolicy {
   /// Ranks a sample and returns the index of the entry to evict. The sample is
   /// never empty. Returning `kNoVictim` means "evict nothing", which is how
   /// the no-eviction policy refuses writes instead of dropping data.
-  [[nodiscard]] virtual std::size_t chooseVictim(const std::vector<EvictionMetadata>& sample) const noexcept = 0;
+  [[nodiscard]] virtual std::size_t chooseVictim(
+      const std::vector<EvictionMetadata>& sample) const noexcept = 0;
 
   /// True when the policy is willing to discard data at all.
   [[nodiscard]] virtual bool evicts() const noexcept { return true; }
@@ -55,6 +56,7 @@ class EvictionPolicy {
 class LruPolicy final : public EvictionPolicy {
  public:
   [[nodiscard]] std::string_view name() const noexcept override { return "allkeys-lru"; }
+
   void touch(EvictionMetadata& meta, std::int64_t now_ms) const noexcept override;
   void onInsert(EvictionMetadata& meta, std::int64_t now_ms) const noexcept override;
   [[nodiscard]] std::size_t chooseVictim(const std::vector<EvictionMetadata>& sample) const noexcept override;
@@ -71,6 +73,7 @@ class LfuPolicy final : public EvictionPolicy {
   explicit LfuPolicy(std::int64_t decay_interval_ms = 60'000) : decay_interval_ms_(decay_interval_ms) {}
 
   [[nodiscard]] std::string_view name() const noexcept override { return "allkeys-lfu"; }
+
   void touch(EvictionMetadata& meta, std::int64_t now_ms) const noexcept override;
   void onInsert(EvictionMetadata& meta, std::int64_t now_ms) const noexcept override;
   [[nodiscard]] std::size_t chooseVictim(const std::vector<EvictionMetadata>& sample) const noexcept override;
@@ -84,6 +87,7 @@ class LfuPolicy final : public EvictionPolicy {
 class RandomPolicy final : public EvictionPolicy {
  public:
   [[nodiscard]] std::string_view name() const noexcept override { return "allkeys-random"; }
+
   void touch(EvictionMetadata& meta, std::int64_t now_ms) const noexcept override;
   void onInsert(EvictionMetadata& meta, std::int64_t now_ms) const noexcept override;
   [[nodiscard]] std::size_t chooseVictim(const std::vector<EvictionMetadata>& sample) const noexcept override;
@@ -95,9 +99,11 @@ class RandomPolicy final : public EvictionPolicy {
 class NoEvictionPolicy final : public EvictionPolicy {
  public:
   [[nodiscard]] std::string_view name() const noexcept override { return "noeviction"; }
+
   void touch(EvictionMetadata& meta, std::int64_t now_ms) const noexcept override;
   void onInsert(EvictionMetadata& meta, std::int64_t now_ms) const noexcept override;
   [[nodiscard]] std::size_t chooseVictim(const std::vector<EvictionMetadata>& sample) const noexcept override;
+
   [[nodiscard]] bool evicts() const noexcept override { return false; }
 };
 

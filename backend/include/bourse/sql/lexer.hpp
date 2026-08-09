@@ -21,17 +21,19 @@ enum class TokenType : std::uint8_t {
 
 struct Token {
   TokenType type = TokenType::kEndOfInput;
-  std::string text;      ///< identifiers are stored as written
-  std::string upper;     ///< uppercased, for keyword comparison
+  std::string text;   ///< identifiers are stored as written
+  std::string upper;  ///< uppercased, for keyword comparison
   std::size_t position = 0;
   bool is_real = false;  ///< numeric literal contained a '.'
 
   [[nodiscard]] bool isKeyword(std::string_view word) const noexcept {
     return type == TokenType::kKeyword && upper == word;
   }
+
   [[nodiscard]] bool isPunctuation(std::string_view symbol) const noexcept {
     return type == TokenType::kPunctuation && text == symbol;
   }
+
   [[nodiscard]] bool isOperator(std::string_view symbol) const noexcept {
     return type == TokenType::kOperator && text == symbol;
   }

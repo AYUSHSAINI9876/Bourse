@@ -72,8 +72,8 @@ Reply CommandRegistry::dispatch(CommandContext& context, const std::vector<std::
       if (!context.principal.authenticated()) {
         return Reply::error("NOAUTH Authentication required.");
       }
-      return Reply::error("NOPERM this user has no permissions to run the '" +
-                          std::string(command->name()) + "' command");
+      return Reply::error("NOPERM this user has no permissions to run the '" + std::string(command->name()) +
+                          "' command");
     }
   }
 

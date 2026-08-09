@@ -47,7 +47,9 @@ class Logger {
   static Logger& instance();
 
   void setLevel(LogLevel level) noexcept { level_.store(level, std::memory_order_relaxed); }
+
   [[nodiscard]] LogLevel level() const noexcept { return level_.load(std::memory_order_relaxed); }
+
   [[nodiscard]] bool enabled(LogLevel level) const noexcept {
     return static_cast<std::uint8_t>(level) >= static_cast<std::uint8_t>(this->level());
   }
@@ -75,7 +77,8 @@ class Logger {
 
   void consumerLoop();
   void deliver(const std::string& line);
-  [[nodiscard]] std::string format(LogLevel level, const char* file, int line, const std::string& message) const;
+  [[nodiscard]] std::string format(LogLevel level, const char* file, int line,
+                                   const std::string& message) const;
 
   std::atomic<LogLevel> level_{LogLevel::kInfo};
   std::atomic<bool> async_{false};
@@ -107,13 +110,12 @@ template <typename... Args>
 
 }  // namespace detail
 
-#define BOURSE_LOG(level, ...)                                                             \
-  do {                                                                                     \
-    ::bourse::Logger& _bourse_logger = ::bourse::Logger::instance();                        \
-    if (_bourse_logger.enabled(level)) {                                                    \
-      _bourse_logger.submit((level), __FILE__, __LINE__,                                    \
-                            ::bourse::detail::concatMessage(__VA_ARGS__));                  \
-    }                                                                                       \
+#define BOURSE_LOG(level, ...)                                                                          \
+  do {                                                                                                  \
+    ::bourse::Logger& _bourse_logger = ::bourse::Logger::instance();                                    \
+    if (_bourse_logger.enabled(level)) {                                                                \
+      _bourse_logger.submit((level), __FILE__, __LINE__, ::bourse::detail::concatMessage(__VA_ARGS__)); \
+    }                                                                                                   \
   } while (false)
 
 #define BOURSE_LOG_TRACE(...) BOURSE_LOG(::bourse::LogLevel::kTrace, __VA_ARGS__)

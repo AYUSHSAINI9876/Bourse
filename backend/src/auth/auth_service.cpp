@@ -26,8 +26,8 @@ constexpr std::size_t kMaxPasswordLength = 256;
 /// Not a substitute for a real strength policy -- it exists so a demo
 /// deployment cannot be seeded with `password`.
 constexpr std::string_view kBannedPasswords[] = {
-    "password", "password1", "12345678", "123456789", "qwertyui", "letmein1",
-    "admin123", "changeme", "bourse123", "iloveyou",
+    "password", "password1", "12345678", "123456789", "qwertyui",
+    "letmein1", "admin123",  "changeme", "bourse123", "iloveyou",
 };
 
 }  // namespace
@@ -43,8 +43,7 @@ Status validateUsername(std::string_view username) {
     const bool allowed = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
                          c == '_' || c == '-' || c == '.';
     if (!allowed) {
-      return Status::invalidArgument(
-          "username may only contain letters, digits, '_', '-' and '.'");
+      return Status::invalidArgument("username may only contain letters, digits, '_', '-' and '.'");
     }
   }
   return Status::success();
@@ -133,8 +132,8 @@ Status AuthService::setPassword(std::string_view username, std::string_view pass
   // A password change must invalidate existing sessions. Otherwise the reason
   // people change passwords -- someone else has one -- is not addressed.
   for (auto session = sessions_.begin(); session != sessions_.end();) {
-    session = (session->second.username == it->second.username) ? sessions_.erase(session)
-                                                                : std::next(session);
+    session =
+        (session->second.username == it->second.username) ? sessions_.erase(session) : std::next(session);
   }
   failures_.erase(std::string(username));
   return Status::success();
@@ -283,8 +282,8 @@ Result<Principal> AuthService::verifyCredentials(std::string_view username, std:
   // returning early, so both paths cost the same and neither reveals whether
   // the username is real.
   const bool user_exists = !stored_hash.empty();
-  const std::string_view hash_to_check = user_exists ? std::string_view(stored_hash)
-                                                     : std::string_view(decoy_hash_);
+  const std::string_view hash_to_check =
+      user_exists ? std::string_view(stored_hash) : std::string_view(decoy_hash_);
   bool matched = false;
   if (!hash_to_check.empty()) {
     const Result<bool> verified = verifyPassword(password, hash_to_check);
@@ -457,8 +456,7 @@ std::size_t AuthService::sweepExpired(std::int64_t now_ms) {
   // the sweep.
   const std::int64_t retention_ms = std::max<std::int64_t>(config_.lockout_ms * 10, 60 * 1000);
   for (auto it = failures_.begin(); it != failures_.end();) {
-    const bool lockout_elapsed =
-        it->second.locked_until_ms != 0 && now_ms >= it->second.locked_until_ms;
+    const bool lockout_elapsed = it->second.locked_until_ms != 0 && now_ms >= it->second.locked_until_ms;
     const bool gone_quiet = now_ms - it->second.last_failure_ms >= retention_ms;
     it = (lockout_elapsed && gone_quiet) || (it->second.locked_until_ms == 0 && gone_quiet)
              ? failures_.erase(it)

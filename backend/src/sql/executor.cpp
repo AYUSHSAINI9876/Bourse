@@ -36,12 +36,8 @@ class Evaluator final : public ExpressionVisitor {
     const Datum operand = result_;
 
     switch (node.op()) {
-      case UnaryOp::kIsNull:
-        result_ = Datum::boolean(operand.isNull());
-        return;
-      case UnaryOp::kIsNotNull:
-        result_ = Datum::boolean(!operand.isNull());
-        return;
+      case UnaryOp::kIsNull: result_ = Datum::boolean(operand.isNull()); return;
+      case UnaryOp::kIsNotNull: result_ = Datum::boolean(!operand.isNull()); return;
       case UnaryOp::kNot:
         // NOT NULL is NULL, not true -- three-valued logic again.
         result_ = operand.isNull() ? Datum::null() : Datum::boolean(!operand.isTrue());
@@ -138,8 +134,7 @@ class Evaluator final : public ExpressionVisitor {
         result_ = Datum::boolean(value);
         return;
       }
-      default:
-        break;
+      default: break;
     }
 
     // Arithmetic.
@@ -147,7 +142,8 @@ class Evaluator final : public ExpressionVisitor {
       result_ = Datum::null();
       return;
     }
-    if (node.op() == BinaryOp::kAdd && (left.type() == DatumType::kText || right.type() == DatumType::kText)) {
+    if (node.op() == BinaryOp::kAdd &&
+        (left.type() == DatumType::kText || right.type() == DatumType::kText)) {
       result_ = Datum::text(left.toString() + right.toString());  // '+' concatenates text
       return;
     }
@@ -196,14 +192,14 @@ class Evaluator final : public ExpressionVisitor {
         }
         result_ = Datum::integer(a % b);
         return;
-      default:
-        fail("unsupported operator");
-        return;
+      default: fail("unsupported operator"); return;
     }
   }
 
   [[nodiscard]] bool failed() const noexcept { return !error_.ok(); }
+
   [[nodiscard]] const Status& error() const noexcept { return error_; }
+
   [[nodiscard]] const Datum& result() const noexcept { return result_; }
 
  private:
@@ -228,6 +224,7 @@ class SeqScanNode final : public PlanNode {
   explicit SeqScanNode(const Table& table) : table_(table) {}
 
   void open() override { cursor_ = 0; }
+
   void close() override { cursor_ = 0; }
 
   bool next(Row& out) override {
@@ -257,6 +254,7 @@ class FilterNode final : public PlanNode {
     examined_ = 0;
     passed_ = 0;
   }
+
   void close() override { child_->close(); }
 
   bool next(Row& out) override {
@@ -284,9 +282,7 @@ class FilterNode final : public PlanNode {
            ", passed=" + std::to_string(passed_) + ")\n  " + child_->describe();
   }
 
-  [[nodiscard]] Status status() const override {
-    return error_.ok() ? child_->status() : error_;
-  }
+  [[nodiscard]] Status status() const override { return error_.ok() ? child_->status() : error_; }
 
  private:
   PlanNodePtr child_;
@@ -389,6 +385,7 @@ class LimitNode final : public PlanNode {
     emitted_ = 0;
     skipped_ = 0;
   }
+
   void close() override { child_->close(); }
 
   bool next(Row& out) override {
@@ -476,7 +473,9 @@ bool likeMatch(std::string_view pattern, std::string_view text) {
   return p == pattern.size();
 }
 
-PlanNodePtr makeSeqScan(const Table& table) { return std::make_unique<SeqScanNode>(table); }
+PlanNodePtr makeSeqScan(const Table& table) {
+  return std::make_unique<SeqScanNode>(table);
+}
 
 PlanNodePtr makeFilter(PlanNodePtr child, const Expression& predicate, const TableSchema& schema) {
   return std::make_unique<FilterNode>(std::move(child), predicate, schema);

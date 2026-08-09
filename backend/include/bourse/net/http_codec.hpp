@@ -113,8 +113,7 @@ struct HttpParseResult {
 ///   - malformed input yields empty rather than a partial read.
 ///
 /// `found` distinguishes an absent field from one that is present and empty.
-[[nodiscard]] std::string jsonFieldOf(std::string_view json, std::string_view field,
-                                      bool* found = nullptr);
+[[nodiscard]] std::string jsonFieldOf(std::string_view json, std::string_view field, bool* found = nullptr);
 
 /// HTTP/1.1 server codec with keep-alive.
 class HttpCodec final : public ProtocolCodec {
@@ -122,6 +121,7 @@ class HttpCodec final : public ProtocolCodec {
   explicit HttpCodec(const Router& router) : router_(router) {}
 
   [[nodiscard]] std::string_view name() const noexcept override { return "http"; }
+
   bool onData(Connection& connection, ByteBuffer& input) override;
 
   /// Requests larger than this are refused with 413 instead of being buffered.

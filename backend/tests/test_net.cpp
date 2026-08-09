@@ -148,9 +148,8 @@ class ServerFixture : public ::testing::Test {
     options.io_threads = 2;
     options.name = "test";
 
-    server_ = std::make_unique<TcpServer>(options, [this] {
-      return std::make_unique<RespCodec>(*registry_, context_);
-    });
+    server_ = std::make_unique<TcpServer>(
+        options, [this] { return std::make_unique<RespCodec>(*registry_, context_); });
     ASSERT_TRUE(server_->start().ok());
     port_ = server_->port();
     ASSERT_NE(port_, 0);
@@ -283,8 +282,8 @@ TEST_F(ServerFixture, ServesManyConcurrentConnections) {
       }
       Socket client = std::move(maybe).value();
       const std::string key = "client:" + std::to_string(i);
-      const std::string request = "*3\r\n$3\r\nSET\r\n$" + std::to_string(key.size()) + "\r\n" + key +
-                                  "\r\n$1\r\n1\r\n";
+      const std::string request =
+          "*3\r\n$3\r\nSET\r\n$" + std::to_string(key.size()) + "\r\n" + key + "\r\n$1\r\n1\r\n";
       writeAll(client, request);
       if (readReply(client, 5) == "+OK\r\n") {
         succeeded.fetch_add(1, std::memory_order_relaxed);
@@ -327,9 +326,9 @@ TEST_F(ServerFixture, PubSubDeliversAcrossConnections) {
   // Wire delivery the same way the real server does, then prove a message
   // published by one connection reaches a subscriber on another.
   pubsub_.setDelivery([this](std::uint64_t id, const std::string& channel, const std::string& payload) {
-    exec::Reply message = exec::Reply::array({exec::Reply::bulkString("message"),
-                                              exec::Reply::bulkString(channel),
-                                              exec::Reply::bulkString(payload)});
+    exec::Reply message =
+        exec::Reply::array({exec::Reply::bulkString("message"), exec::Reply::bulkString(channel),
+                            exec::Reply::bulkString(payload)});
     server_->sendTo(id, message.toResp());
   });
 

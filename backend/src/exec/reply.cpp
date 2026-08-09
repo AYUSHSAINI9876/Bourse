@@ -86,21 +86,15 @@ std::string Reply::toResp() const {
 void Reply::encodeJson(std::string& out) const {
   switch (kind_) {
     case Kind::kSimpleString:
-    case Kind::kBulkString:
-      appendJsonEscaped(out, text_);
-      break;
+    case Kind::kBulkString: appendJsonEscaped(out, text_); break;
     case Kind::kError:
       out.append("{\"error\":");
       appendJsonEscaped(out, text_);
       out.push_back('}');
       break;
-    case Kind::kInteger:
-      out.append(std::to_string(integer_));
-      break;
+    case Kind::kInteger: out.append(std::to_string(integer_)); break;
     case Kind::kNull:
-    case Kind::kNullArray:
-      out.append("null");
-      break;
+    case Kind::kNullArray: out.append("null"); break;
     case Kind::kArray:
       out.push_back('[');
       for (std::size_t i = 0; i < elements_.size(); ++i) {

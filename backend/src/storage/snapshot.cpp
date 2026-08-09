@@ -91,14 +91,9 @@ class Reader {
 void encodeValue(std::string& out, const Value& value) {
   out.push_back(static_cast<char>(value.type()));
   switch (value.type()) {
-    case ValueType::kNone:
-      break;
-    case ValueType::kString:
-      putString(out, value.toStringValue());
-      break;
-    case ValueType::kInteger:
-      putU64(out, static_cast<std::uint64_t>(value.asInteger().valueOr(0)));
-      break;
+    case ValueType::kNone: break;
+    case ValueType::kString: putString(out, value.toStringValue()); break;
+    case ValueType::kInteger: putU64(out, static_cast<std::uint64_t>(value.asInteger().valueOr(0))); break;
     case ValueType::kList: {
       const ListValue& list = value.list();
       putU32(out, static_cast<std::uint32_t>(list.size()));
@@ -134,9 +129,7 @@ bool decodeValue(Reader& reader, Value& out) {
   }
 
   switch (static_cast<ValueType>(tag)) {
-    case ValueType::kNone:
-      out = Value{};
-      return true;
+    case ValueType::kNone: out = Value{}; return true;
     case ValueType::kString: {
       std::string text;
       if (!reader.readString(text)) {
@@ -210,7 +203,9 @@ bool decodeValue(Reader& reader, Value& out) {
 
 }  // namespace
 
-bool Snapshot::exists(const std::string& path) { return File::exists(path); }
+bool Snapshot::exists(const std::string& path) {
+  return File::exists(path);
+}
 
 Result<SnapshotStats> Snapshot::save(const cache::Keyspace& keyspace, const std::string& path) {
   const Stopwatch watch;
@@ -284,8 +279,8 @@ Result<SnapshotStats> Snapshot::load(cache::Keyspace& keyspace, const std::strin
 
   std::uint32_t stored_crc = 0;
   for (int i = 3; i >= 0; --i) {
-    stored_crc = (stored_crc << 8) |
-                 static_cast<unsigned char>(image[image.size() - 4 + static_cast<std::size_t>(i)]);
+    stored_crc =
+        (stored_crc << 8) | static_cast<unsigned char>(image[image.size() - 4 + static_cast<std::size_t>(i)]);
   }
   if (crc32(body.data(), body.size()) != stored_crc) {
     return Status::corruption("snapshot checksum mismatch; refusing to load a damaged image");

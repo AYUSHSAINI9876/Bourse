@@ -37,6 +37,7 @@ struct IoResult {
   int error_code = 0;
 
   [[nodiscard]] bool ok() const noexcept { return outcome == IoOutcome::kOk; }
+
   [[nodiscard]] bool retryable() const noexcept {
     return outcome == IoOutcome::kWouldBlock || outcome == IoOutcome::kInterrupted;
   }
@@ -46,7 +47,9 @@ struct IoResult {
 class Socket {
  public:
   Socket() = default;
+
   explicit Socket(SocketHandle handle) noexcept : handle_(handle) {}
+
   ~Socket();
 
   Socket(Socket&& other) noexcept;
@@ -84,6 +87,7 @@ class Socket {
   [[nodiscard]] SocketHandle release() noexcept;
 
   [[nodiscard]] bool valid() const noexcept { return handle_ != kInvalidSocket; }
+
   [[nodiscard]] SocketHandle handle() const noexcept { return handle_; }
 
   /// Reads and clears SO_ERROR. Used to complete a non-blocking connect.

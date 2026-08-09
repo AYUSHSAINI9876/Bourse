@@ -27,10 +27,14 @@ std::size_t entryFootprint(const std::string& key, const Entry& entry) {
 /// half-open [begin, end) pair clamped to the container.
 std::pair<std::size_t, std::size_t> normaliseRange(std::int64_t start, std::int64_t stop, std::size_t size) {
   const auto n = static_cast<std::int64_t>(size);
-  if (start < 0) start += n;
-  if (stop < 0) stop += n;
-  if (start < 0) start = 0;
-  if (stop >= n) stop = n - 1;
+  if (start < 0)
+    start += n;
+  if (stop < 0)
+    stop += n;
+  if (start < 0)
+    start = 0;
+  if (stop >= n)
+    stop = n - 1;
   if (n == 0 || start > stop || start >= n) {
     return {0, 0};
   }
@@ -55,7 +59,7 @@ Keyspace::Keyspace(KeyspaceOptions options) : options_(std::move(options)) {
 Keyspace::~Keyspace() = default;
 
 Keyspace::Shard& Keyspace::shardFor(std::string_view key) const noexcept {
-  return *shards_[StringHash{}(key) & shard_mask_];
+  return *shards_[StringHash{}(key)&shard_mask_];
 }
 
 void Keyspace::accountInsert(Shard& shard, const std::string& key, const Entry& entry) const {
@@ -400,7 +404,8 @@ Result<std::size_t> Keyspace::stringLength(std::string_view key) const {
 // lists
 // ---------------------------------------------------------------------------
 
-Result<std::size_t> Keyspace::listPush(std::string_view key, const std::vector<std::string>& values, bool front) {
+Result<std::size_t> Keyspace::listPush(std::string_view key, const std::vector<std::string>& values,
+                                       bool front) {
   const std::int64_t now = nowMillis();
   Shard& shard = shardFor(key);
   std::lock_guard<std::mutex> lock(shard.mutex);

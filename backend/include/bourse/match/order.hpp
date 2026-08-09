@@ -21,7 +21,10 @@ using Quantity = std::int64_t;
 
 inline constexpr std::int64_t kPriceScale = 10000;
 
-[[nodiscard]] inline constexpr Price priceFromTicks(std::int64_t ticks) noexcept { return ticks; }
+[[nodiscard]] inline constexpr Price priceFromTicks(std::int64_t ticks) noexcept {
+  return ticks;
+}
+
 [[nodiscard]] std::string formatPrice(Price price);
 [[nodiscard]] bool parsePrice(std::string_view text, Price& out);
 
@@ -82,7 +85,9 @@ struct Order {
   Order* next = nullptr;
 
   [[nodiscard]] Quantity remaining() const noexcept { return quantity - filled; }
+
   [[nodiscard]] bool isFilled() const noexcept { return filled >= quantity; }
+
   [[nodiscard]] bool isTerminal() const noexcept {
     return status == OrderStatus::kFilled || status == OrderStatus::kCancelled ||
            status == OrderStatus::kRejected;

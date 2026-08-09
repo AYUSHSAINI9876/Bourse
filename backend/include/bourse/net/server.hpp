@@ -60,8 +60,11 @@ class TcpServer {
   void stop();
 
   [[nodiscard]] std::uint16_t port() const noexcept { return bound_port_; }
+
   [[nodiscard]] std::size_t connectionCount() const;
+
   [[nodiscard]] EventLoop& acceptorLoop() noexcept { return acceptor_loop_; }
+
   [[nodiscard]] std::string_view pollerName() const noexcept { return acceptor_loop_.pollerName(); }
 
   /// Delivers `data` to one connection, hopping to its owning loop first.

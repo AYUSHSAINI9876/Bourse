@@ -35,8 +35,11 @@ class DiskManager {
   Status sync();
 
   [[nodiscard]] std::uint32_t pageCount() const noexcept { return page_count_; }
+
   [[nodiscard]] PageId rootPageId() const noexcept { return root_page_id_; }
+
   Status setRootPageId(PageId id);
+
   [[nodiscard]] const std::string& path() const noexcept { return path_; }
 
   static constexpr std::uint32_t kMagic = 0x42545245;  // "BTRE"
@@ -91,9 +94,13 @@ class BufferPool {
   Status flushAll();
 
   [[nodiscard]] std::size_t hits() const noexcept { return hits_; }
+
   [[nodiscard]] std::size_t misses() const noexcept { return misses_; }
+
   [[nodiscard]] std::size_t evictions() const noexcept { return evictions_; }
+
   [[nodiscard]] std::size_t pinnedFrames() const;
+
   [[nodiscard]] std::size_t frameCount() const noexcept { return frames_.size(); }
 
  private:

@@ -26,11 +26,12 @@ std::string toUpperAscii(std::string_view text) {
 class AuthCommand final : public Command {
  public:
   [[nodiscard]] std::string_view name() const noexcept override { return "AUTH"; }
+
   [[nodiscard]] int arity() const noexcept override { return -2; }
+
   [[nodiscard]] bool isNoAuth() const noexcept override { return true; }
-  [[nodiscard]] std::string_view summary() const noexcept override {
-    return "AUTH [username] password";
-  }
+
+  [[nodiscard]] std::string_view summary() const noexcept override { return "AUTH [username] password"; }
 
   Reply execute(CommandContext& context, const std::vector<std::string>& argv) override {
     if (argv.size() > 3) {
@@ -64,15 +65,18 @@ class AuthCommand final : public Command {
 class WhoAmICommand final : public Command {
  public:
   [[nodiscard]] std::string_view name() const noexcept override { return "WHOAMI"; }
+
   [[nodiscard]] int arity() const noexcept override { return 1; }
+
   [[nodiscard]] bool isNoAuth() const noexcept override { return true; }
+
   [[nodiscard]] std::string_view summary() const noexcept override { return "WHOAMI"; }
 
   Reply execute(CommandContext& context, const std::vector<std::string>& /*argv*/) override {
     std::vector<Reply> out;
     out.push_back(Reply::bulkString("username"));
-    out.push_back(Reply::bulkString(context.principal.username.empty() ? "(anonymous)"
-                                                                       : context.principal.username));
+    out.push_back(
+        Reply::bulkString(context.principal.username.empty() ? "(anonymous)" : context.principal.username));
     out.push_back(Reply::bulkString("role"));
     out.push_back(Reply::bulkString(std::string(auth::toString(context.principal.role))));
     out.push_back(Reply::bulkString("auth_enabled"));
@@ -87,13 +91,17 @@ class WhoAmICommand final : public Command {
 class UserCommand final : public Command {
  public:
   [[nodiscard]] std::string_view name() const noexcept override { return "USER"; }
+
   [[nodiscard]] int arity() const noexcept override { return -2; }
+
   [[nodiscard]] bool isAdmin() const noexcept override { return true; }
+
   /// Not `isWrite()`: user records live outside the keyspace and are never
   /// journalled. Replaying `USER ADD alice hunter2` from the WAL would put a
   /// plaintext password in a file on disk, which is worse than not persisting
   /// users at all. See docs/security.md.
   [[nodiscard]] bool isWrite() const noexcept override { return false; }
+
   [[nodiscard]] std::string_view summary() const noexcept override {
     return "USER LIST | ADD username password role | PASSWD username password | "
            "ROLE username role | DEL username";

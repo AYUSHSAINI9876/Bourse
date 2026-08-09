@@ -57,6 +57,7 @@ struct Entry {
 /// lookup on the hot path would allocate.
 struct StringHash {
   using is_transparent = void;
+
   [[nodiscard]] std::size_t operator()(std::string_view s) const noexcept {
     return std::hash<std::string_view>{}(s);
   }
@@ -109,9 +110,12 @@ class Keyspace {
   [[nodiscard]] Result<std::size_t> listLength(std::string_view key) const;
 
   // -- hashes -------------------------------------------------------------
-  Result<std::size_t> hashSet(std::string_view key, const std::vector<std::pair<std::string, std::string>>& fields);
-  [[nodiscard]] Result<std::optional<std::string>> hashGet(std::string_view key, std::string_view field) const;
-  [[nodiscard]] Result<std::vector<std::pair<std::string, std::string>>> hashGetAll(std::string_view key) const;
+  Result<std::size_t> hashSet(std::string_view key,
+                              const std::vector<std::pair<std::string, std::string>>& fields);
+  [[nodiscard]] Result<std::optional<std::string>> hashGet(std::string_view key,
+                                                           std::string_view field) const;
+  [[nodiscard]] Result<std::vector<std::pair<std::string, std::string>>> hashGetAll(
+      std::string_view key) const;
   Result<std::size_t> hashDelete(std::string_view key, const std::vector<std::string>& fields);
   [[nodiscard]] Result<std::size_t> hashLength(std::string_view key) const;
 
@@ -134,6 +138,7 @@ class Keyspace {
   std::size_t enforceMemoryBudget();
 
   [[nodiscard]] KeyspaceStats stats() const;
+
   [[nodiscard]] std::string_view evictionPolicyName() const noexcept { return policy_->name(); }
 
   /// Visits every live (non-expired) entry. Takes one shard lock at a time, so

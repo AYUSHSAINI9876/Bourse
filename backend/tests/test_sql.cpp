@@ -353,7 +353,8 @@ TEST_F(SqlFixture, LimitStopsPullingRows) {
   const ResultSet limited = run("SELECT * FROM big WHERE n >= 0 LIMIT 5");
   EXPECT_EQ(limited.rows.size(), 5u);
   EXPECT_NE(limited.plan.find("examined=5"), std::string::npos)
-      << "LIMIT did not short-circuit the scan; plan was:\n" << limited.plan;
+      << "LIMIT did not short-circuit the scan; plan was:\n"
+      << limited.plan;
 }
 
 TEST_F(SqlFixture, RendersResultsAsJsonAndText) {

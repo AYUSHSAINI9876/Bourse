@@ -59,8 +59,11 @@ class ObjectPool {
   }
 
   [[nodiscard]] std::size_t live() const noexcept { return live_; }
+
   [[nodiscard]] std::size_t available() const noexcept { return free_list_.size(); }
+
   [[nodiscard]] std::size_t capacity() const noexcept { return capacity_; }
+
   /// Number of times the pool had to ask the OS for memory. In a well-sized
   /// pool this stops increasing after warm-up; the benchmark asserts on it.
   [[nodiscard]] std::size_t chunkCount() const noexcept { return chunks_.size(); }
@@ -133,6 +136,7 @@ class Arena {
   }
 
   [[nodiscard]] std::size_t bytesUsed() const noexcept { return used_; }
+
   [[nodiscard]] std::size_t blockCount() const noexcept { return blocks_.size(); }
 
  private:

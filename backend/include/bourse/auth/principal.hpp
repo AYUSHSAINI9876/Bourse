@@ -45,6 +45,7 @@ struct Principal {
   Role role = Role::kAnonymous;
 
   [[nodiscard]] bool authenticated() const noexcept { return role != Role::kAnonymous; }
+
   [[nodiscard]] bool can(Role required) const noexcept { return role >= required; }
 };
 

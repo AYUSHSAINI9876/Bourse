@@ -34,6 +34,7 @@ class ConfigEnvironmentTest : public ::testing::Test {
   // this a leaked PORT would silently reconfigure every later test in the
   // binary, and the failure would land somewhere unrelated.
   void SetUp() override { clear(); }
+
   void TearDown() override { clear(); }
 
   static void clear() {
@@ -46,9 +47,7 @@ class ConfigEnvironmentTest : public ::testing::Test {
     ::unsetenv("BOURSE_DEMO_PASSWORD");
   }
 
-  static void set(const char* name, const char* value) {
-    ASSERT_EQ(::setenv(name, value, 1), 0);
-  }
+  static void set(const char* name, const char* value) { ASSERT_EQ(::setenv(name, value, 1), 0); }
 };
 
 TEST_F(ConfigEnvironmentTest, DefaultsApplyWhenTheEnvironmentIsEmpty) {

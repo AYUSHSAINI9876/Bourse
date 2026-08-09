@@ -23,10 +23,12 @@ class TempFile {
               std::to_string(reinterpret_cast<std::uintptr_t>(this)) + ".db"))
                 .string();
   }
+
   ~TempFile() {
     std::error_code ec;
     std::filesystem::remove(path_, ec);
   }
+
   TempFile(const TempFile&) = delete;
   TempFile& operator=(const TempFile&) = delete;
 
@@ -239,10 +241,11 @@ class BTreeFixture : public ::testing::Test {
 
   std::vector<std::string> collectKeys() {
     std::vector<std::string> keys;
-    EXPECT_TRUE(tree_->forEach([&](std::string_view key, RecordId) {
-                       keys.emplace_back(key);
-                       return true;
-                     })
+    EXPECT_TRUE(tree_
+                    ->forEach([&](std::string_view key, RecordId) {
+                      keys.emplace_back(key);
+                      return true;
+                    })
                     .ok());
     return keys;
   }
@@ -350,10 +353,12 @@ TEST_F(BTreeFixture, RangeScanReturnsExactlyTheRange) {
   }
 
   std::vector<std::string> range;
-  ASSERT_TRUE(tree_->scan(keyOf(100), keyOf(200), [&](std::string_view key, RecordId) {
-                    range.emplace_back(key);
-                    return true;
-                  })
+  ASSERT_TRUE(tree_
+                  ->scan(keyOf(100), keyOf(200),
+                         [&](std::string_view key, RecordId) {
+                           range.emplace_back(key);
+                           return true;
+                         })
                   .ok());
 
   ASSERT_EQ(range.size(), 100u) << "range is half-open: [100, 200)";
@@ -367,7 +372,8 @@ TEST_F(BTreeFixture, ScanStopsWhenTheVisitorSaysSo) {
     ASSERT_TRUE(tree_->insert(keyOf(i), static_cast<RecordId>(i)).ok());
   }
   int seen = 0;
-  ASSERT_TRUE(tree_->forEach([&](std::string_view, RecordId) {
+  ASSERT_TRUE(tree_
+                  ->forEach([&](std::string_view, RecordId) {
                     ++seen;
                     return seen < 10;
                   })
@@ -380,10 +386,12 @@ TEST_F(BTreeFixture, ScanFromAKeyThatDoesNotExist) {
     ASSERT_TRUE(tree_->insert(keyOf(i), static_cast<RecordId>(i)).ok());
   }
   std::vector<std::string> range;
-  ASSERT_TRUE(tree_->scan(keyOf(51), keyOf(60), [&](std::string_view key, RecordId) {
-                    range.emplace_back(key);
-                    return true;
-                  })
+  ASSERT_TRUE(tree_
+                  ->scan(keyOf(51), keyOf(60),
+                         [&](std::string_view key, RecordId) {
+                           range.emplace_back(key);
+                           return true;
+                         })
                   .ok());
   ASSERT_FALSE(range.empty());
   EXPECT_EQ(range.front(), keyOf(52)) << "a scan from an absent key must start at the next present one";

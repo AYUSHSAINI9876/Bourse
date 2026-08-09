@@ -30,13 +30,20 @@ LogLevel parseLogLevel(std::string_view text, LogLevel fallback) noexcept {
   for (char c : text) {
     lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
   }
-  if (lowered == "trace") return LogLevel::kTrace;
-  if (lowered == "debug") return LogLevel::kDebug;
-  if (lowered == "info") return LogLevel::kInfo;
-  if (lowered == "warn" || lowered == "warning") return LogLevel::kWarn;
-  if (lowered == "error") return LogLevel::kError;
-  if (lowered == "fatal") return LogLevel::kFatal;
-  if (lowered == "off" || lowered == "none") return LogLevel::kOff;
+  if (lowered == "trace")
+    return LogLevel::kTrace;
+  if (lowered == "debug")
+    return LogLevel::kDebug;
+  if (lowered == "info")
+    return LogLevel::kInfo;
+  if (lowered == "warn" || lowered == "warning")
+    return LogLevel::kWarn;
+  if (lowered == "error")
+    return LogLevel::kError;
+  if (lowered == "fatal")
+    return LogLevel::kFatal;
+  if (lowered == "off" || lowered == "none")
+    return LogLevel::kOff;
   return fallback;
 }
 
@@ -109,7 +116,9 @@ Logger::Logger() {
   }
 }
 
-Logger::~Logger() { setAsync(false); }
+Logger::~Logger() {
+  setAsync(false);
+}
 
 void Logger::setSink(Sink sink) {
   const bool was_async = async_.load(std::memory_order_acquire);

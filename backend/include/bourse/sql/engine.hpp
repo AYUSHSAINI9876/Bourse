@@ -61,6 +61,7 @@ class PlanNode {
   virtual void close() = 0;
 
   [[nodiscard]] virtual std::string describe() const = 0;
+
   [[nodiscard]] virtual Status status() const { return Status::success(); }
 };
 

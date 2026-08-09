@@ -104,8 +104,7 @@ Status applyEnvironmentDefaults(Config& config) {
   if (const char* user = std::getenv("BOURSE_ADMIN_USER"); user != nullptr && *user != '\0') {
     config.admin_user = user;
   }
-  if (const char* password = std::getenv("BOURSE_ADMIN_PASSWORD");
-      password != nullptr && *password != '\0') {
+  if (const char* password = std::getenv("BOURSE_ADMIN_PASSWORD"); password != nullptr && *password != '\0') {
     config.admin_password = password;
     // Supplying a password without asking for auth is unambiguous intent, and
     // a server that silently ignored it would be enforcing nothing.
@@ -114,8 +113,7 @@ Status applyEnvironmentDefaults(Config& config) {
   if (const char* user = std::getenv("BOURSE_DEMO_USER"); user != nullptr && *user != '\0') {
     config.demo_user = user;
   }
-  if (const char* password = std::getenv("BOURSE_DEMO_PASSWORD");
-      password != nullptr && *password != '\0') {
+  if (const char* password = std::getenv("BOURSE_DEMO_PASSWORD"); password != nullptr && *password != '\0') {
     config.demo_password = password;
   }
   return Status::success();
@@ -374,9 +372,8 @@ Status BourseServer::start() {
   options.io_threads = config_.io_threads;
   options.name = "bourse-resp";
 
-  resp_server_ = std::make_unique<net::TcpServer>(options, [this] {
-    return std::make_unique<net::RespCodec>(*registry_, context_);
-  });
+  resp_server_ = std::make_unique<net::TcpServer>(
+      options, [this] { return std::make_unique<net::RespCodec>(*registry_, context_); });
 
   // Recovery must complete before the listener accepts anything: a client that
   // connected mid-replay could observe a keyspace that is only half restored.
@@ -402,9 +399,13 @@ Status BourseServer::start() {
   return Status::success();
 }
 
-std::string BourseServer::snapshotPath() const { return config_.data_dir + "/bourse.snapshot"; }
+std::string BourseServer::snapshotPath() const {
+  return config_.data_dir + "/bourse.snapshot";
+}
 
-std::string BourseServer::walPath() const { return config_.data_dir + "/bourse.wal"; }
+std::string BourseServer::walPath() const {
+  return config_.data_dir + "/bourse.wal";
+}
 
 Result<std::size_t> BourseServer::recover() {
   BOURSE_TRY(File::ensureDirectory(config_.data_dir));
@@ -440,8 +441,8 @@ Result<std::size_t> BourseServer::recover() {
         // Replay reapplies commands this server already accepted and
         // journalled, so it runs as an administrator. Re-checking permissions
         // here would let a role change silently drop history on restart.
-        exec::CommandContext command_context{
-            context_, nullptr, auth::Principal{"(wal-replay)", auth::Role::kAdmin}, "local"};
+        exec::CommandContext command_context{context_, nullptr,
+                                             auth::Principal{"(wal-replay)", auth::Role::kAdmin}, "local"};
         const exec::Reply reply = registry_->dispatch(command_context, record.argv);
         if (reply.isError()) {
           BOURSE_LOG_WARN("WAL replay: record ", record.sequence, " failed: ", reply.text());
@@ -517,8 +518,7 @@ Status BourseServer::bootstrapAdministrator() {
   // unlike an account created at runtime, and a viewer cannot write, cannot
   // FLUSHALL and cannot manage users -- so the credentials are safe to print
   // in a README.
-  if (!config_.demo_user.empty() && !config_.demo_password.empty() &&
-      !auth_.hasUser(config_.demo_user)) {
+  if (!config_.demo_user.empty() && !config_.demo_password.empty() && !auth_.hasUser(config_.demo_user)) {
     const Status demo = auth_.addUser(config_.demo_user, config_.demo_password, auth::Role::kViewer);
     if (!demo.ok()) {
       // Not fatal: a misconfigured demo account must not stop the server from
@@ -569,16 +569,17 @@ Status BourseServer::startHttp() {
   options.io_threads = 2;
   options.name = "bourse-http";
 
-  http_server_ = std::make_unique<net::TcpServer>(
-      options, [this] { return std::make_unique<net::HttpCodec>(router_); });
+  http_server_ =
+      std::make_unique<net::TcpServer>(options, [this] { return std::make_unique<net::HttpCodec>(router_); });
   BOURSE_TRY(http_server_->start());
 
   // Its own acceptor thread, so a browser holding a keep-alive connection open
   // can never delay the RESP acceptor.
   http_thread_ = std::thread([this] { http_server_->runForever(); });
 
-  BOURSE_LOG_INFO("HTTP endpoint ready on port ", http_server_->port(), " -- dashboard at http://localhost:",
-                  http_server_->port(), "/  (", router_.routeCount(), " routes)");
+  BOURSE_LOG_INFO("HTTP endpoint ready on port ", http_server_->port(),
+                  " -- dashboard at http://localhost:", http_server_->port(), "/  (", router_.routeCount(),
+                  " routes)");
   return Status::success();
 }
 
@@ -598,13 +599,13 @@ void BourseServer::installPubSubDelivery() {
   // not: it hands an id and a payload to the server, which resolves the id
   // under its own lock and hops to the owning event loop. This indirection is
   // what makes publish-during-disconnect safe.
-  pubsub_.setDelivery([this](std::uint64_t connection_id, const std::string& channel,
-                             const std::string& payload) {
-    exec::Reply message = exec::Reply::array({exec::Reply::bulkString("message"),
-                                              exec::Reply::bulkString(channel),
-                                              exec::Reply::bulkString(payload)});
-    resp_server_->sendTo(connection_id, message.toResp());
-  });
+  pubsub_.setDelivery(
+      [this](std::uint64_t connection_id, const std::string& channel, const std::string& payload) {
+        exec::Reply message =
+            exec::Reply::array({exec::Reply::bulkString("message"), exec::Reply::bulkString(channel),
+                                exec::Reply::bulkString(payload)});
+        resp_server_->sendTo(connection_id, message.toResp());
+      });
 }
 
 void BourseServer::startBackgroundCron() {
@@ -699,6 +700,8 @@ std::uint16_t BourseServer::respPort() const noexcept {
   return resp_server_ ? resp_server_->port() : 0;
 }
 
-std::uint16_t BourseServer::httpPort() const noexcept { return http_server_ ? http_server_->port() : 0; }
+std::uint16_t BourseServer::httpPort() const noexcept {
+  return http_server_ ? http_server_->port() : 0;
+}
 
 }  // namespace bourse::server

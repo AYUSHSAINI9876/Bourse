@@ -64,8 +64,7 @@ class MatchingEngine {
   ExecutionReport amend(const std::string& symbol, OrderId id, Price new_price, Quantity new_quantity,
                         bool* found);
 
-  [[nodiscard]] std::optional<BookSnapshot> snapshot(const std::string& symbol,
-                                                     std::size_t depth = 10) const;
+  [[nodiscard]] std::optional<BookSnapshot> snapshot(const std::string& symbol, std::size_t depth = 10) const;
   [[nodiscard]] std::vector<Trade> recentTrades(const std::string& symbol, std::size_t limit) const;
   [[nodiscard]] std::vector<std::string> symbols() const;
   [[nodiscard]] bool hasSymbol(const std::string& symbol) const;

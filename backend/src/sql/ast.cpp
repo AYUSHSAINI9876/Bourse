@@ -248,12 +248,9 @@ Result<Datum> Datum::coerce(DatumType target) const {
   }
 
   switch (target) {
-    case DatumType::kNull:
-      return Datum::null();
-    case DatumType::kText:
-      return Datum::text(toString());
-    case DatumType::kBoolean:
-      return Datum::boolean(isTrue());
+    case DatumType::kNull: return Datum::null();
+    case DatumType::kText: return Datum::text(toString());
+    case DatumType::kBoolean: return Datum::boolean(isTrue());
     case DatumType::kInteger: {
       if (isNumeric()) {
         return Datum::integer(asInteger());

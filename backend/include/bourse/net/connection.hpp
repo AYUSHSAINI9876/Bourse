@@ -40,6 +40,7 @@ class ProtocolCodec {
   virtual bool onData(Connection& connection, ByteBuffer& input) = 0;
 
   virtual void onConnect(Connection& /*connection*/) {}
+
   virtual void onClose(Connection& /*connection*/) {}
 };
 
@@ -84,10 +85,15 @@ class Connection : public std::enable_shared_from_this<Connection> {
   void switchCodec(CodecPtr codec);
 
   [[nodiscard]] std::uint64_t id() const noexcept { return id_; }
+
   [[nodiscard]] const std::string& peer() const noexcept { return peer_; }
+
   [[nodiscard]] bool closed() const noexcept { return closed_; }
+
   [[nodiscard]] EventLoop& loop() noexcept { return loop_; }
+
   [[nodiscard]] std::size_t pendingOutputBytes() const noexcept { return output_.readable(); }
+
   [[nodiscard]] std::string_view codecName() const noexcept { return codec_->name(); }
 
   /// Identity established by `AUTH` on this connection.
@@ -99,11 +105,13 @@ class Connection : public std::enable_shared_from_this<Connection> {
   /// No lock: a connection is pinned to one event loop for its entire life, so
   /// only that loop's thread ever touches this.
   [[nodiscard]] const auth::Principal& principal() const noexcept { return principal_; }
+
   void setPrincipal(auth::Principal principal) { principal_ = std::move(principal); }
 
   /// Free-form per-connection state used by codecs (the RESP codec keeps its
   /// subscription set here, HTTP keeps keep-alive state).
   void setUserData(std::shared_ptr<void> data) { user_data_ = std::move(data); }
+
   [[nodiscard]] const std::shared_ptr<void>& userData() const noexcept { return user_data_; }
 
   void setCloseCallback(CloseCallback callback) { close_callback_ = std::move(callback); }

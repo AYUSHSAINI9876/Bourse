@@ -44,9 +44,9 @@ struct WalRecord {
 class WriteAheadLog {
  public:
   enum class SyncPolicy : std::uint8_t {
-    kNever,       ///< rely on the OS page cache; fastest, loses on host crash
-    kEverySecond, ///< bounded loss window, the practical default
-    kEveryWrite,  ///< no acknowledged write is ever lost; slowest
+    kNever,        ///< rely on the OS page cache; fastest, loses on host crash
+    kEverySecond,  ///< bounded loss window, the practical default
+    kEveryWrite,   ///< no acknowledged write is ever lost; slowest
   };
 
   struct Options {
@@ -83,7 +83,9 @@ class WriteAheadLog {
 
   [[nodiscard]] std::uint64_t recordCount() const;
   [[nodiscard]] std::uint64_t bytesWritten() const;
+
   [[nodiscard]] const std::string& path() const noexcept { return options_.path; }
+
   [[nodiscard]] SyncPolicy syncPolicy() const noexcept { return options_.sync_policy; }
 
   [[nodiscard]] static const char* toString(SyncPolicy policy) noexcept;

@@ -118,9 +118,7 @@ void Router::handle(HttpRequest& request, HttpResponse& response) const {
   for (auto it = middleware_.rbegin(); it != middleware_.rend(); ++it) {
     const Middleware* current = &(*it);
     std::function<void()> inner = std::move(next);
-    next = [current, &request, &response, inner = std::move(inner)] {
-      (*current)(request, response, inner);
-    };
+    next = [current, &request, &response, inner = std::move(inner)] { (*current)(request, response, inner); };
   }
 
   next();

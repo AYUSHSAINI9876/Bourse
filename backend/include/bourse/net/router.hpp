@@ -38,12 +38,15 @@ class Router {
   Router& get(std::string pattern, HttpHandler handler) {
     return route("GET", std::move(pattern), std::move(handler));
   }
+
   Router& post(std::string pattern, HttpHandler handler) {
     return route("POST", std::move(pattern), std::move(handler));
   }
+
   Router& put(std::string pattern, HttpHandler handler) {
     return route("PUT", std::move(pattern), std::move(handler));
   }
+
   Router& del(std::string pattern, HttpHandler handler) {
     return route("DELETE", std::move(pattern), std::move(handler));
   }
@@ -57,6 +60,7 @@ class Router {
   void handle(HttpRequest& request, HttpResponse& response) const;
 
   [[nodiscard]] std::size_t routeCount() const noexcept { return routes_.size(); }
+
   [[nodiscard]] std::size_t middlewareCount() const noexcept { return middleware_.size(); }
 
   /// Splits a path into non-empty segments. Exposed for testing.

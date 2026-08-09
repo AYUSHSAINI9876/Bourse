@@ -244,7 +244,9 @@ namespace {
 struct Tracked {
   static inline int live = 0;
   int value;
+
   explicit Tracked(int v) : value(v) { ++live; }
+
   ~Tracked() { --live; }
 };
 }  // namespace

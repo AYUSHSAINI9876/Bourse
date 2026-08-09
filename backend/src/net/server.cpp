@@ -11,7 +11,9 @@ namespace bourse::net {
 TcpServer::TcpServer(ServerOptions options, CodecFactory codec_factory)
     : options_(std::move(options)), codec_factory_(std::move(codec_factory)) {}
 
-TcpServer::~TcpServer() { stop(); }
+TcpServer::~TcpServer() {
+  stop();
+}
 
 Status TcpServer::start() {
   if (started_.exchange(true, std::memory_order_acq_rel)) {
@@ -44,8 +46,8 @@ Status TcpServer::start() {
   }
   listener_token_ = token.value();
 
-  BOURSE_LOG_INFO(options_.name, " listening on ", options_.host, ':', bound_port_, " (poller=",
-                  acceptor_loop_.pollerName(), ", io_threads=", thread_count, ')');
+  BOURSE_LOG_INFO(options_.name, " listening on ", options_.host, ':', bound_port_,
+                  " (poller=", acceptor_loop_.pollerName(), ", io_threads=", thread_count, ')');
   return Status::success();
 }
 
@@ -170,7 +172,9 @@ std::size_t TcpServer::connectionCount() const {
   return connections_.size();
 }
 
-void TcpServer::runForever() { acceptor_loop_.run(); }
+void TcpServer::runForever() {
+  acceptor_loop_.run();
+}
 
 void TcpServer::stop() {
   if (!started_.exchange(false, std::memory_order_acq_rel)) {

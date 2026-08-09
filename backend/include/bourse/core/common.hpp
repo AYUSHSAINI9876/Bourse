@@ -51,16 +51,20 @@ template <typename Fn>
 class ScopeExit {
  public:
   explicit ScopeExit(Fn fn) : fn_(std::move(fn)) {}
+
   ~ScopeExit() {
     if (active_) {
       fn_();
     }
   }
+
   ScopeExit(const ScopeExit&) = delete;
   ScopeExit& operator=(const ScopeExit&) = delete;
+
   ScopeExit(ScopeExit&& other) noexcept : fn_(std::move(other.fn_)), active_(other.active_) {
     other.active_ = false;
   }
+
   ScopeExit& operator=(ScopeExit&&) = delete;
 
   void dismiss() noexcept { active_ = false; }

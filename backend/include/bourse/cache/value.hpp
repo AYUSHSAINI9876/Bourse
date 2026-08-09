@@ -44,19 +44,29 @@ class Value {
   Value() = default;
 
   static Value makeString(std::string s) { return Value(std::move(s)); }
+
   static Value makeInteger(std::int64_t v) { return Value(v); }
+
   static Value makeList(ListValue v) { return Value(std::move(v)); }
+
   static Value makeHash(HashValue v) { return Value(std::move(v)); }
+
   static Value makeSet(SetValue v) { return Value(std::move(v)); }
 
   [[nodiscard]] ValueType type() const noexcept;
+
   [[nodiscard]] const char* typeName() const noexcept { return toString(type()); }
+
   [[nodiscard]] bool empty() const noexcept { return type() == ValueType::kNone; }
 
   [[nodiscard]] bool isString() const noexcept { return std::holds_alternative<std::string>(data_); }
+
   [[nodiscard]] bool isInteger() const noexcept { return std::holds_alternative<std::int64_t>(data_); }
+
   [[nodiscard]] bool isList() const noexcept { return std::holds_alternative<ListValue>(data_); }
+
   [[nodiscard]] bool isHash() const noexcept { return std::holds_alternative<HashValue>(data_); }
+
   [[nodiscard]] bool isSet() const noexcept { return std::holds_alternative<SetValue>(data_); }
 
   /// Both kString and kInteger answer to this -- an integer-encoded value is
@@ -71,13 +81,19 @@ class Value {
   [[nodiscard]] Result<std::int64_t> asInteger() const;
 
   ListValue& list() { return std::get<ListValue>(data_); }
+
   const ListValue& list() const { return std::get<ListValue>(data_); }
+
   HashValue& hash() { return std::get<HashValue>(data_); }
+
   const HashValue& hash() const { return std::get<HashValue>(data_); }
+
   SetValue& set() { return std::get<SetValue>(data_); }
+
   const SetValue& set() const { return std::get<SetValue>(data_); }
 
   void setInteger(std::int64_t v) { data_ = v; }
+
   void setString(std::string s) { data_ = std::move(s); }
 
   /// Number of elements for containers, 1 for scalars, 0 for kNone. Used by
@@ -91,9 +107,13 @@ class Value {
 
  private:
   explicit Value(std::string s) : data_(std::move(s)) {}
+
   explicit Value(std::int64_t v) : data_(v) {}
+
   explicit Value(ListValue v) : data_(std::move(v)) {}
+
   explicit Value(HashValue v) : data_(std::move(v)) {}
+
   explicit Value(SetValue v) : data_(std::move(v)) {}
 
   std::variant<std::monostate, std::string, std::int64_t, ListValue, HashValue, SetValue> data_;

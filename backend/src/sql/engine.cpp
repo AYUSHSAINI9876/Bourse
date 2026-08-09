@@ -316,8 +316,8 @@ Result<ResultSet> Engine::runInsert(const InsertStatement& statement) {
       };
       if (std::any_of(table->rows.begin(), table->rows.end(), clashes) ||
           std::any_of(staged.begin(), staged.end(), clashes)) {
-        return Status::alreadyExists("duplicate value for primary key '" +
-                                     table->schema.columns[i].name + "'");
+        return Status::alreadyExists("duplicate value for primary key '" + table->schema.columns[i].name +
+                                     "'");
       }
     }
 
@@ -354,8 +354,7 @@ Result<ResultSet> Engine::runSelect(const SelectStatement& statement) {
 
   // Projection happens outside the pipeline so that WHERE and ORDER BY can
   // still reference columns the SELECT list does not output.
-  const bool wildcard =
-      statement.items.size() == 1 && statement.items[0].expression == nullptr;
+  const bool wildcard = statement.items.size() == 1 && statement.items[0].expression == nullptr;
 
   ResultSet result;
   if (wildcard) {

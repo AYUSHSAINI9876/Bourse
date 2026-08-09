@@ -4,10 +4,10 @@
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
-#include <string>
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -54,6 +54,7 @@ class EventLoop {
   void runOnce(int timeout_ms);
 
   void stop();
+
   [[nodiscard]] bool running() const noexcept { return running_.load(std::memory_order_acquire); }
 
   /// Thread-safe. Runs `task` on the loop thread at the next opportunity. When
@@ -68,12 +69,17 @@ class EventLoop {
   void cancelTimer(std::uint64_t timer_id);
 
   [[nodiscard]] bool inLoopThread() const noexcept { return std::this_thread::get_id() == owner_; }
+
   /// Adopts the calling thread as the owner. Used by EventLoopThread, which
   /// constructs the loop on one thread and runs it on another.
   void bindToCurrentThread() noexcept { owner_ = std::this_thread::get_id(); }
 
   [[nodiscard]] std::string_view pollerName() const noexcept { return poller_->name(); }
-  [[nodiscard]] std::uint64_t iterations() const noexcept { return iterations_.load(std::memory_order_relaxed); }
+
+  [[nodiscard]] std::uint64_t iterations() const noexcept {
+    return iterations_.load(std::memory_order_relaxed);
+  }
+
   [[nodiscard]] std::size_t registeredCount() const noexcept { return registrations_.size(); }
 
  private:
@@ -134,6 +140,7 @@ class EventLoopThread {
   EventLoopThread& operator=(const EventLoopThread&) = delete;
 
   [[nodiscard]] EventLoop& loop() noexcept { return *loop_; }
+
   void stop();
 
  private:

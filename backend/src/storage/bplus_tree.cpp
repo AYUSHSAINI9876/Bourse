@@ -44,18 +44,34 @@ std::uint64_t getU64(const std::byte* in) {
   return value;
 }
 
-PageType typeOf(const std::byte* page) { return static_cast<PageType>(page[0]); }
-void setType(std::byte* page, PageType type) { page[0] = static_cast<std::byte>(type); }
+PageType typeOf(const std::byte* page) {
+  return static_cast<PageType>(page[0]);
+}
 
-std::uint32_t countOf(const std::byte* page) { return getU32(page + 1); }
-void setCount(std::byte* page, std::uint32_t count) { putU32(page + 1, count); }
+void setType(std::byte* page, PageType type) {
+  page[0] = static_cast<std::byte>(type);
+}
 
-PageId nextLeafOf(const std::byte* page) { return getU32(page + 5); }
-void setNextLeaf(std::byte* page, PageId id) { putU32(page + 5, id); }
+std::uint32_t countOf(const std::byte* page) {
+  return getU32(page + 1);
+}
+
+void setCount(std::byte* page, std::uint32_t count) {
+  putU32(page + 1, count);
+}
+
+PageId nextLeafOf(const std::byte* page) {
+  return getU32(page + 5);
+}
+
+void setNextLeaf(std::byte* page, PageId id) {
+  putU32(page + 5, id);
+}
 
 std::byte* leafEntry(std::byte* page, std::size_t index) {
   return page + BPlusTree::kLeafHeaderSize + index * BPlusTree::kLeafEntrySize;
 }
+
 const std::byte* leafEntry(const std::byte* page, std::size_t index) {
   return page + BPlusTree::kLeafHeaderSize + index * BPlusTree::kLeafEntrySize;
 }
@@ -75,16 +91,27 @@ void setEntryKey(std::byte* entry, std::string_view key) {
   }
 }
 
-RecordId leafValue(const std::byte* entry) { return getU64(entry + 1 + kMaxKeySize); }
-void setLeafValue(std::byte* entry, RecordId value) { putU64(entry + 1 + kMaxKeySize, value); }
+RecordId leafValue(const std::byte* entry) {
+  return getU64(entry + 1 + kMaxKeySize);
+}
+
+void setLeafValue(std::byte* entry, RecordId value) {
+  putU64(entry + 1 + kMaxKeySize, value);
+}
 
 /// Internal layout: [header 16][child0 u32][key0 child1][key1 child2]...
-std::byte* internalChild0(std::byte* page) { return page + BPlusTree::kLeafHeaderSize; }
-const std::byte* internalChild0(const std::byte* page) { return page + BPlusTree::kLeafHeaderSize; }
+std::byte* internalChild0(std::byte* page) {
+  return page + BPlusTree::kLeafHeaderSize;
+}
+
+const std::byte* internalChild0(const std::byte* page) {
+  return page + BPlusTree::kLeafHeaderSize;
+}
 
 std::byte* internalEntry(std::byte* page, std::size_t index) {
   return page + BPlusTree::kInternalHeaderSize + index * BPlusTree::kInternalEntrySize;
 }
+
 const std::byte* internalEntry(const std::byte* page, std::size_t index) {
   return page + BPlusTree::kInternalHeaderSize + index * BPlusTree::kInternalEntrySize;
 }
@@ -115,20 +142,25 @@ int compareKeys(std::string_view a, std::string_view b) {
 class PageGuard {
  public:
   PageGuard(BufferPool& pool, PageId id, std::byte* data) : pool_(&pool), id_(id), data_(data) {}
+
   ~PageGuard() {
     if (pool_ != nullptr) {
       (void)pool_->unpin(id_, dirty_);
     }
   }
+
   PageGuard(const PageGuard&) = delete;
   PageGuard& operator=(const PageGuard&) = delete;
+
   PageGuard(PageGuard&& other) noexcept
       : pool_(other.pool_), id_(other.id_), data_(other.data_), dirty_(other.dirty_) {
     other.pool_ = nullptr;
   }
+
   PageGuard& operator=(PageGuard&&) = delete;
 
   [[nodiscard]] std::byte* data() const noexcept { return data_; }
+
   void markDirty() noexcept { dirty_ = true; }
 
  private:
@@ -508,8 +540,7 @@ Result<bool> BPlusTree::erase(std::string_view key) {
     }
 
     guard.value().markDirty();
-    std::memmove(leafEntry(page, index), leafEntry(page, index + 1),
-                 (count - index - 1) * kLeafEntrySize);
+    std::memmove(leafEntry(page, index), leafEntry(page, index + 1), (count - index - 1) * kLeafEntrySize);
     setCount(page, count - 1);
     became_empty = count - 1 == 0;
   }
@@ -750,8 +781,8 @@ Status BPlusTree::validateNode(PageId id, int depth, int* leaf_depth, std::strin
     if (*leaf_depth == -1) {
       *leaf_depth = depth;
     } else if (*leaf_depth != depth) {
-      return Status::corruption("leaves are at differing depths: " + std::to_string(*leaf_depth) +
-                                " and " + std::to_string(depth));
+      return Status::corruption("leaves are at differing depths: " + std::to_string(*leaf_depth) + " and " +
+                                std::to_string(depth));
     }
     for (std::uint32_t i = 0; i < count; ++i) {
       const std::string_view key = entryKey(leafEntry(page, i));
@@ -780,12 +811,10 @@ Status BPlusTree::validateNode(PageId id, int depth, int* leaf_depth, std::strin
   }
 
   for (std::uint32_t i = 0; i <= count; ++i) {
-    const std::string_view child_lower =
-        i == 0 ? lower : entryKey(internalEntry(page, i - 1));
-    const std::string_view child_upper =
-        i == count ? upper : entryKey(internalEntry(page, i));
-    BOURSE_TRY(validateNode(internalChild(page, i), depth + 1, leaf_depth, previous_key, child_lower,
-                            child_upper));
+    const std::string_view child_lower = i == 0 ? lower : entryKey(internalEntry(page, i - 1));
+    const std::string_view child_upper = i == count ? upper : entryKey(internalEntry(page, i));
+    BOURSE_TRY(
+        validateNode(internalChild(page, i), depth + 1, leaf_depth, previous_key, child_lower, child_upper));
   }
   return Status::success();
 }

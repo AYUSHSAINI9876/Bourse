@@ -70,12 +70,9 @@ std::size_t Value::approximateBytes() const noexcept {
   constexpr std::size_t kStringOverhead = sizeof(std::string);
 
   switch (type()) {
-    case ValueType::kNone:
-      return 0;
-    case ValueType::kInteger:
-      return sizeof(std::int64_t);
-    case ValueType::kString:
-      return kStringOverhead + std::get<std::string>(data_).capacity();
+    case ValueType::kNone: return 0;
+    case ValueType::kInteger: return sizeof(std::int64_t);
+    case ValueType::kString: return kStringOverhead + std::get<std::string>(data_).capacity();
     case ValueType::kList: {
       const ListValue& list = std::get<ListValue>(data_);
       std::size_t total = sizeof(ListValue);

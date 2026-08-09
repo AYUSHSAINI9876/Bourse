@@ -17,6 +17,7 @@ class QuietLoggingEnvironment : public ::testing::Environment {
       bourse::Logger::instance().setLevel(bourse::LogLevel::kOff);
     }
   }
+
   void TearDown() override { bourse::Logger::instance().flush(); }
 };
 

@@ -41,8 +41,8 @@ Status Connection::start() {
   BOURSE_TRY(socket_.setTcpNoDelay(true));
 
   ConnectionPtr guard = shared_from_this();
-  Result<std::uint64_t> token = loop_.registerFd(
-      static_cast<int>(socket_.handle()), kReadable, [this, guard](std::uint32_t flags) { handleEvent(flags); });
+  Result<std::uint64_t> token = loop_.registerFd(static_cast<int>(socket_.handle()), kReadable,
+                                                 [this, guard](std::uint32_t flags) { handleEvent(flags); });
   if (!token.ok()) {
     return token.status();
   }
@@ -113,7 +113,9 @@ void Connection::handleRead() {
   updateInterest();
 }
 
-void Connection::send(std::string_view data) { send(data.data(), data.size()); }
+void Connection::send(std::string_view data) {
+  send(data.data(), data.size());
+}
 
 void Connection::send(const void* data, std::size_t length) {
   if (closed_ || length == 0) {

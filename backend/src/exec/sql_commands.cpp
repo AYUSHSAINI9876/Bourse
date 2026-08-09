@@ -7,7 +7,9 @@
 namespace bourse::exec {
 namespace {
 
-Reply noEngine() { return Reply::error("ERR the SQL engine is not enabled on this server"); }
+Reply noEngine() {
+  return Reply::error("ERR the SQL engine is not enabled on this server");
+}
 
 /// Renders a ResultSet as a RESP array: a header row of column names followed
 /// by one array per data row. Keeping the shape uniform means redis-cli prints
@@ -83,17 +85,15 @@ void registerSqlCommands(CommandRegistry& registry) {
           return Reply::error("ERR " + result.status().message());
         }
         // Every plan node describes itself, so EXPLAIN costs nothing extra.
-        return Reply::bulkString(result.value().plan.empty() ? "no plan (not a query)"
-                                                             : result.value().plan);
+        return Reply::bulkString(result.value().plan.empty() ? "no plan (not a query)" : result.value().plan);
       });
 
-  add(registry, "TABLES", 1, false, "TABLES",
-      [](CommandContext& ctx, const std::vector<std::string>&) {
-        if (ctx.server.sql_engine == nullptr) {
-          return noEngine();
-        }
-        return Reply::stringArray(ctx.server.sql_engine->tableNames());
-      });
+  add(registry, "TABLES", 1, false, "TABLES", [](CommandContext& ctx, const std::vector<std::string>&) {
+    if (ctx.server.sql_engine == nullptr) {
+      return noEngine();
+    }
+    return Reply::stringArray(ctx.server.sql_engine->tableNames());
+  });
 
   add(registry, "DESCRIBE", 2, false, "DESCRIBE <table>",
       [](CommandContext& ctx, const std::vector<std::string>& argv) {

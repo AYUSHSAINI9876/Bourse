@@ -39,15 +39,12 @@ class Stopwatch {
   [[nodiscard]] std::int64_t elapsedNanos() const noexcept {
     return std::chrono::duration_cast<Nanos>(SteadyClock::now() - start_).count();
   }
-  [[nodiscard]] double elapsedMicros() const noexcept {
-    return static_cast<double>(elapsedNanos()) / 1e3;
-  }
-  [[nodiscard]] double elapsedMillis() const noexcept {
-    return static_cast<double>(elapsedNanos()) / 1e6;
-  }
-  [[nodiscard]] double elapsedSeconds() const noexcept {
-    return static_cast<double>(elapsedNanos()) / 1e9;
-  }
+
+  [[nodiscard]] double elapsedMicros() const noexcept { return static_cast<double>(elapsedNanos()) / 1e3; }
+
+  [[nodiscard]] double elapsedMillis() const noexcept { return static_cast<double>(elapsedNanos()) / 1e6; }
+
+  [[nodiscard]] double elapsedSeconds() const noexcept { return static_cast<double>(elapsedNanos()) / 1e9; }
 
  private:
   SteadyClock::time_point start_;

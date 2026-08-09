@@ -66,7 +66,9 @@ std::vector<std::string> PubSub::unsubscribeAll(std::uint64_t connection_id) {
   return removed;
 }
 
-void PubSub::removeSubscriber(std::uint64_t connection_id) { (void)unsubscribeAll(connection_id); }
+void PubSub::removeSubscriber(std::uint64_t connection_id) {
+  (void)unsubscribeAll(connection_id);
+}
 
 std::size_t PubSub::publish(const std::string& channel, const std::string& payload) {
   std::vector<std::uint64_t> targets;

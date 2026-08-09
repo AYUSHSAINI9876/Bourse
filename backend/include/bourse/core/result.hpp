@@ -58,24 +58,37 @@ constexpr const char* toString(ErrorCode code) noexcept {
 class Status {
  public:
   Status() noexcept = default;
+
   Status(ErrorCode code, std::string message) : code_(code), message_(std::move(message)) {}
 
   /// Named `success()` rather than `ok()` because the query method below owns
   /// that name; C++ will not overload a static factory against a const member.
   static Status success() noexcept { return Status{}; }
+
   static Status invalidArgument(std::string m) { return {ErrorCode::kInvalidArgument, std::move(m)}; }
+
   static Status notFound(std::string m) { return {ErrorCode::kNotFound, std::move(m)}; }
+
   static Status alreadyExists(std::string m) { return {ErrorCode::kAlreadyExists, std::move(m)}; }
+
   static Status ioError(std::string m) { return {ErrorCode::kIoError, std::move(m)}; }
+
   static Status corruption(std::string m) { return {ErrorCode::kCorruption, std::move(m)}; }
+
   static Status unsupported(std::string m) { return {ErrorCode::kUnsupported, std::move(m)}; }
+
   static Status protocolError(std::string m) { return {ErrorCode::kProtocolError, std::move(m)}; }
+
   static Status wrongType(std::string m) { return {ErrorCode::kWrongType, std::move(m)}; }
+
   static Status closed(std::string m) { return {ErrorCode::kClosed, std::move(m)}; }
+
   static Status internal(std::string m) { return {ErrorCode::kInternal, std::move(m)}; }
 
   [[nodiscard]] bool ok() const noexcept { return code_ == ErrorCode::kOk; }
+
   [[nodiscard]] ErrorCode code() const noexcept { return code_; }
+
   [[nodiscard]] const std::string& message() const noexcept { return message_; }
 
   [[nodiscard]] std::string toString() const {
@@ -97,12 +110,14 @@ class Status {
 template <typename T>
 class Result {
  public:
-  Result(T value) : slot_(std::move(value)) {}            // NOLINT(google-explicit-constructor)
-  Result(Status status) : slot_(std::move(status)) {      // NOLINT(google-explicit-constructor)
+  Result(T value) : slot_(std::move(value)) {}  // NOLINT(google-explicit-constructor)
+
+  Result(Status status) : slot_(std::move(status)) {  // NOLINT(google-explicit-constructor)
     assert(!std::get<Status>(slot_).ok() && "Result<T> constructed from an OK Status");
   }
 
   [[nodiscard]] bool ok() const noexcept { return std::holds_alternative<T>(slot_); }
+
   explicit operator bool() const noexcept { return ok(); }
 
   [[nodiscard]] const Status& status() const {
@@ -114,10 +129,12 @@ class Result {
     assert(ok() && "Result<T>::value() on an error Result");
     return std::get<T>(slot_);
   }
+
   const T& value() const& {
     assert(ok() && "Result<T>::value() on an error Result");
     return std::get<T>(slot_);
   }
+
   T&& value() && {
     assert(ok() && "Result<T>::value() on an error Result");
     return std::get<T>(std::move(slot_));
@@ -126,8 +143,11 @@ class Result {
   T valueOr(T fallback) const& { return ok() ? std::get<T>(slot_) : std::move(fallback); }
 
   T* operator->() { return &value(); }
+
   const T* operator->() const { return &value(); }
+
   T& operator*() & { return value(); }
+
   const T& operator*() const& { return value(); }
 
  private:
@@ -135,16 +155,18 @@ class Result {
 };
 
 /// Early-return helper. `BOURSE_TRY(status_expr);`
-#define BOURSE_TRY(expr)                    \
-  do {                                      \
-    ::bourse::Status _bourse_s = (expr);    \
-    if (!_bourse_s.ok()) return _bourse_s;  \
+#define BOURSE_TRY(expr)                 \
+  do {                                   \
+    ::bourse::Status _bourse_s = (expr); \
+    if (!_bourse_s.ok())                 \
+      return _bourse_s;                  \
   } while (false)
 
 /// Assign-or-return helper. `BOURSE_ASSIGN_OR_RETURN(auto v, mayFail());`
 #define BOURSE_ASSIGN_OR_RETURN_IMPL(tmp, decl, expr) \
   auto tmp = (expr);                                  \
-  if (!tmp.ok()) return tmp.status();                 \
+  if (!tmp.ok())                                      \
+    return tmp.status();                              \
   decl = std::move(tmp).value()
 
 #define BOURSE_CONCAT_INNER(a, b) a##b
