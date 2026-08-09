@@ -6,6 +6,8 @@
 #include <sstream>
 #include <utility>
 
+#include "bourse/core/system_error.hpp"
+
 #if defined(BOURSE_PLATFORM_WINDOWS)
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -13,13 +15,14 @@ using socklen_arg_t = int;
 #define BOURSE_CLOSESOCKET ::closesocket
 #else
 #include <arpa/inet.h>
-#include <csignal>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+#include <csignal>
 using socklen_arg_t = socklen_t;
 #define BOURSE_CLOSESOCKET ::close
 #endif
@@ -70,9 +73,13 @@ IoOutcome classifyError(int code) {
 
 }  // namespace
 
-Socket::~Socket() { close(); }
+Socket::~Socket() {
+  close();
+}
 
-Socket::Socket(Socket&& other) noexcept : handle_(other.handle_) { other.handle_ = kInvalidSocket; }
+Socket::Socket(Socket&& other) noexcept : handle_(other.handle_) {
+  other.handle_ = kInvalidSocket;
+}
 
 Socket& Socket::operator=(Socket&& other) noexcept {
   if (this != &other) {
@@ -105,21 +112,10 @@ int Socket::lastError() noexcept {
 }
 
 std::string Socket::describeError(int code) {
-#if defined(BOURSE_PLATFORM_WINDOWS)
-  char* text = nullptr;
-  ::FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                   nullptr, static_cast<DWORD>(code), 0, reinterpret_cast<char*>(&text), 0, nullptr);
-  std::string message = text != nullptr ? text : "unknown";
-  if (text != nullptr) {
-    ::LocalFree(text);
-  }
-  while (!message.empty() && (message.back() == '\n' || message.back() == '\r')) {
-    message.pop_back();
-  }
-  return message;
-#else
-  return std::strerror(code);
-#endif
+  // Both platform branches now live in describeSystemError; a socket error
+  // code and an errno are the same thing to the formatter, and keeping two
+  // copies of the Windows FormatMessage dance was how they would drift.
+  return describeSystemError(code);
 }
 
 Status Socket::initializeNetworking() {
@@ -157,7 +153,8 @@ Result<Socket> Socket::createTcpListener(const std::string& host, std::uint16_t 
     return Status::ioError("getaddrinfo(" + host + ":" + port_text + ") failed");
   }
 
-  Socket sock(static_cast<SocketHandle>(::socket(resolved->ai_family, resolved->ai_socktype, resolved->ai_protocol)));
+  Socket sock(
+      static_cast<SocketHandle>(::socket(resolved->ai_family, resolved->ai_socktype, resolved->ai_protocol)));
   if (!sock.valid()) {
     ::freeaddrinfo(resolved);
     return Status::ioError("socket() failed: " + describeError(lastError()));
@@ -193,7 +190,8 @@ Result<Socket> Socket::connectTcp(const std::string& host, std::uint16_t port, i
     return Status::ioError("getaddrinfo(" + host + ":" + port_text + ") failed");
   }
 
-  Socket sock(static_cast<SocketHandle>(::socket(resolved->ai_family, resolved->ai_socktype, resolved->ai_protocol)));
+  Socket sock(
+      static_cast<SocketHandle>(::socket(resolved->ai_family, resolved->ai_socktype, resolved->ai_protocol)));
   if (!sock.valid()) {
     ::freeaddrinfo(resolved);
     return Status::ioError("socket() failed: " + describeError(lastError()));
@@ -219,7 +217,8 @@ Result<Socket> Socket::accept(std::string* peer_address) {
   const auto accepted = static_cast<SocketHandle>(
       ::accept4(handle_, reinterpret_cast<sockaddr*>(&peer), &peer_len, SOCK_NONBLOCK | SOCK_CLOEXEC));
 #else
-  const auto accepted = static_cast<SocketHandle>(::accept(handle_, reinterpret_cast<sockaddr*>(&peer), &peer_len));
+  const auto accepted =
+      static_cast<SocketHandle>(::accept(handle_, reinterpret_cast<sockaddr*>(&peer), &peer_len));
 #endif
 
   if (accepted == kInvalidSocket) {
@@ -267,7 +266,8 @@ namespace {
 Status setBoolOption(SocketHandle handle, int level, int option, bool enable, const char* name) {
   const int value = enable ? 1 : 0;
   if (::setsockopt(handle, level, option, reinterpret_cast<const char*>(&value), sizeof(value)) != 0) {
-    return Status::ioError(std::string("setsockopt(") + name + "): " + Socket::describeError(Socket::lastError()));
+    return Status::ioError(std::string("setsockopt(") + name +
+                           "): " + Socket::describeError(Socket::lastError()));
   }
   return Status::success();
 }
@@ -288,14 +288,16 @@ Status Socket::setKeepAlive(bool enable) {
 }
 
 Status Socket::setSendBufferSize(int bytes) {
-  if (::setsockopt(handle_, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&bytes), sizeof(bytes)) != 0) {
+  if (::setsockopt(handle_, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&bytes), sizeof(bytes)) !=
+      0) {
     return Status::ioError("setsockopt(SO_SNDBUF): " + describeError(lastError()));
   }
   return Status::success();
 }
 
 Status Socket::setReceiveBufferSize(int bytes) {
-  if (::setsockopt(handle_, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&bytes), sizeof(bytes)) != 0) {
+  if (::setsockopt(handle_, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&bytes), sizeof(bytes)) !=
+      0) {
     return Status::ioError("setsockopt(SO_RCVBUF): " + describeError(lastError()));
   }
   return Status::success();

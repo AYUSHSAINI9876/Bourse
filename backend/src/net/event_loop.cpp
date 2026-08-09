@@ -7,6 +7,7 @@
 
 #include "bourse/core/clock.hpp"
 #include "bourse/core/logger.hpp"
+#include "bourse/core/system_error.hpp"
 
 #if defined(BOURSE_PLATFORM_LINUX)
 #include <sys/eventfd.h>
@@ -74,7 +75,7 @@ void EventLoop::wakeup() {
   const std::uint64_t one = 1;
   const ssize_t written = ::write(wakeup_write_fd_, &one, sizeof(one));
   if (written < 0 && errno != EAGAIN && errno != EINTR) {
-    BOURSE_LOG_WARN("wakeup write failed: ", std::strerror(errno));
+    BOURSE_LOG_WARN("wakeup write failed: ", describeSystemError(errno));
   }
 #endif
 }
@@ -145,7 +146,9 @@ std::uint64_t EventLoop::scheduleEvery(std::int64_t interval_ms, Task task) {
   return id;
 }
 
-void EventLoop::cancelTimer(std::uint64_t timer_id) { cancelled_timers_.insert(timer_id); }
+void EventLoop::cancelTimer(std::uint64_t timer_id) {
+  cancelled_timers_.insert(timer_id);
+}
 
 int EventLoop::computeTimeout(int fallback_ms) const {
   if (timers_.empty()) {
@@ -163,7 +166,7 @@ void EventLoop::runOnce(int timeout_ms) {
 
   const int ready = poller_->wait(ready_, effective_timeout);
   if (ready < 0 && errno != EINTR) {
-    BOURSE_LOG_ERROR("poller wait failed: ", std::strerror(errno));
+    BOURSE_LOG_ERROR("poller wait failed: ", describeSystemError(errno));
   }
 
   for (const PollEvent& event : ready_) {
@@ -259,7 +262,9 @@ EventLoopThread::EventLoopThread(std::string name) : name_(std::move(name)) {
   started_.wait(lock, [this] { return started_flag_; });
 }
 
-EventLoopThread::~EventLoopThread() { stop(); }
+EventLoopThread::~EventLoopThread() {
+  stop();
+}
 
 void EventLoopThread::stop() {
   if (loop_) {

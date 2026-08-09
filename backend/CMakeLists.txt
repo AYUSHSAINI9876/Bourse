@@ -43,6 +43,7 @@ add_library(bourse_core STATIC
   src/core/byte_buffer.cpp
   src/core/socket.cpp
   src/core/file.cpp
+  src/core/system_error.cpp
 
   # L1 -- durable storage
   src/storage/wal.cpp

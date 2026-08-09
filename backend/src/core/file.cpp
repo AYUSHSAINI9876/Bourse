@@ -1,5 +1,9 @@
 #include "bourse/core/file.hpp"
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #include <cerrno>
 #include <cstring>
 #include <filesystem>
@@ -7,9 +11,7 @@
 #include <sstream>
 #include <utility>
 
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
+#include "bourse/core/system_error.hpp"
 
 #if defined(_WIN32)
 #include <io.h>
@@ -28,15 +30,19 @@ namespace {
 
 std::string errnoMessage(const char* what, const std::string& path) {
   std::ostringstream oss;
-  oss << what << " '" << path << "': " << std::strerror(errno) << " (errno " << errno << ')';
+  oss << what << " '" << path << "': " << describeSystemError(errno) << " (errno " << errno << ')';
   return oss.str();
 }
 
 }  // namespace
 
-File::~File() { close(); }
+File::~File() {
+  close();
+}
 
-File::File(File&& other) noexcept : fd_(other.fd_), path_(std::move(other.path_)) { other.fd_ = -1; }
+File::File(File&& other) noexcept : fd_(other.fd_), path_(std::move(other.path_)) {
+  other.fd_ = -1;
+}
 
 File& File::operator=(File&& other) noexcept {
   if (this != &other) {
@@ -101,7 +107,8 @@ Status File::readAt(std::uint64_t offset, void* buffer, std::size_t n) const {
     }
     if (got == 0) {
       std::ostringstream oss;
-      oss << "short read on '" << path_ << "': wanted " << n << " bytes at offset " << offset << ", got " << done;
+      oss << "short read on '" << path_ << "': wanted " << n << " bytes at offset " << offset << ", got "
+          << done;
       return Status::ioError(oss.str());
     }
     done += static_cast<std::size_t>(got);
@@ -154,11 +161,13 @@ Result<std::uint64_t> File::size() const {
   }
 #if defined(_WIN32)
   struct _stat64 info {};
+
   if (::_fstat64(fd_, &info) != 0) {
     return Status::ioError(errnoMessage("fstat", path_));
   }
 #else
   struct stat info {};
+
   if (::fstat(fd_, &info) != 0) {
     return Status::ioError(errnoMessage("fstat", path_));
   }

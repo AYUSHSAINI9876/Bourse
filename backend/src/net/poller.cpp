@@ -6,6 +6,7 @@
 #include <unordered_map>
 
 #include "bourse/core/logger.hpp"
+#include "bourse/core/system_error.hpp"
 
 #if defined(BOURSE_HAVE_EPOLL)
 #include <sys/epoll.h>
@@ -91,16 +92,21 @@ class PollPoller final : public Poller {
       PollEvent event;
       event.fd = entries_[i].fd;
       event.token = entries_[i].token;
-      if ((revents & POLLIN) != 0) event.flags |= kReadable;
-      if ((revents & POLLOUT) != 0) event.flags |= kWritable;
-      if ((revents & POLLERR) != 0) event.flags |= kError;
-      if ((revents & POLLHUP) != 0) event.flags |= kHangup;
+      if ((revents & POLLIN) != 0)
+        event.flags |= kReadable;
+      if ((revents & POLLOUT) != 0)
+        event.flags |= kWritable;
+      if ((revents & POLLERR) != 0)
+        event.flags |= kError;
+      if ((revents & POLLHUP) != 0)
+        event.flags |= kHangup;
       out.push_back(event);
     }
     return static_cast<int>(out.size());
   }
 
   [[nodiscard]] std::string_view name() const noexcept override { return "poll"; }
+
   [[nodiscard]] std::size_t registeredCount() const noexcept override { return entries_.size(); }
 
  private:
@@ -120,8 +126,10 @@ class PollPoller final : public Poller {
       PollFd pfd{};
       pfd.fd = entry.fd;
       pfd.events = 0;
-      if ((entry.interest & kReadable) != 0) pfd.events |= POLLIN;
-      if ((entry.interest & kWritable) != 0) pfd.events |= POLLOUT;
+      if ((entry.interest & kReadable) != 0)
+        pfd.events |= POLLIN;
+      if ((entry.interest & kWritable) != 0)
+        pfd.events |= POLLOUT;
       pollfds_.push_back(pfd);
     }
     dirty_ = false;
@@ -143,7 +151,7 @@ class EpollPoller final : public Poller {
  public:
   EpollPoller() : epoll_fd_(::epoll_create1(EPOLL_CLOEXEC)) {
     if (epoll_fd_ < 0) {
-      BOURSE_LOG_ERROR("epoll_create1 failed: ", std::strerror(errno));
+      BOURSE_LOG_ERROR("epoll_create1 failed: ", describeSystemError(errno));
     }
     ready_.resize(kInitialEventCapacity);
   }
@@ -164,7 +172,7 @@ class EpollPoller final : public Poller {
 
   Status remove(int fd) override {
     if (::epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr) != 0) {
-      return Status::ioError(std::string("epoll_ctl(DEL): ") + std::strerror(errno));
+      return Status::ioError(std::string("epoll_ctl(DEL): ") + describeSystemError(errno));
     }
     if (registered_ > 0) {
       --registered_;
@@ -185,10 +193,14 @@ class EpollPoller final : public Poller {
       event.token = ready_[static_cast<std::size_t>(i)].data.u64;
       event.fd = -1;  // epoll carries the token, not the fd; the loop resolves it
       const std::uint32_t revents = ready_[static_cast<std::size_t>(i)].events;
-      if ((revents & EPOLLIN) != 0) event.flags |= kReadable;
-      if ((revents & EPOLLOUT) != 0) event.flags |= kWritable;
-      if ((revents & EPOLLERR) != 0) event.flags |= kError;
-      if ((revents & (EPOLLHUP | EPOLLRDHUP)) != 0) event.flags |= kHangup;
+      if ((revents & EPOLLIN) != 0)
+        event.flags |= kReadable;
+      if ((revents & EPOLLOUT) != 0)
+        event.flags |= kWritable;
+      if ((revents & EPOLLERR) != 0)
+        event.flags |= kError;
+      if ((revents & (EPOLLHUP | EPOLLRDHUP)) != 0)
+        event.flags |= kHangup;
       out.push_back(event);
     }
 
@@ -202,6 +214,7 @@ class EpollPoller final : public Poller {
   }
 
   [[nodiscard]] std::string_view name() const noexcept override { return "epoll"; }
+
   [[nodiscard]] std::size_t registeredCount() const noexcept override { return registered_; }
 
  private:
@@ -212,14 +225,16 @@ class EpollPoller final : public Poller {
     epoll_event event{};
     event.data.u64 = token;
     event.events = 0;
-    if ((interest & kReadable) != 0) event.events |= EPOLLIN;
-    if ((interest & kWritable) != 0) event.events |= EPOLLOUT;
+    if ((interest & kReadable) != 0)
+      event.events |= EPOLLIN;
+    if ((interest & kWritable) != 0)
+      event.events |= EPOLLOUT;
     // EPOLLRDHUP surfaces a half-close as a readiness event instead of leaving
     // the connection parked until the next read returns 0.
     event.events |= EPOLLRDHUP;
 
     if (::epoll_ctl(epoll_fd_, operation, fd, &event) != 0) {
-      return Status::ioError(std::string("epoll_ctl: ") + std::strerror(errno));
+      return Status::ioError(std::string("epoll_ctl: ") + describeSystemError(errno));
     }
     if (operation == EPOLL_CTL_ADD) {
       ++registered_;
@@ -244,6 +259,8 @@ std::unique_ptr<Poller> Poller::create() {
 #endif
 }
 
-std::unique_ptr<Poller> Poller::createPortable() { return std::make_unique<PollPoller>(); }
+std::unique_ptr<Poller> Poller::createPortable() {
+  return std::make_unique<PollPoller>();
+}
 
 }  // namespace bourse::net
