@@ -198,11 +198,29 @@ std::string MetricsRegistry::renderJson() const {
     if (!first)
       out << ',';
     first = false;
+    // One field per statement rather than a single twelve-term << chain.
+    //
+    // The chain was the only place in the tree where clang-format 18.1.3 and
+    // 18.1.8 disagreed: LLVM changed how stream chains wrap in 18.1.4, so a
+    // tree formatted by one version failed the check under the other. Short
+    // statements give the formatter no wrapping decision to make, so every
+    // 18.x agrees and the pinned version is belt-and-braces rather than
+    // load-bearing.
+    //
+    // Deliberately not a table of {name, value} pairs: `mean` is a double and
+    // the rest are uint64_t, so a single array would have to pick one type and
+    // silently truncate the other.
     const Histogram::Snapshot s = histogram->snapshot();
-    out << '"' << name << "\":{"
-        << "\"count\":" << s.count << ',' << "\"min\":" << s.min << ',' << "\"max\":" << s.max << ','
-        << "\"mean\":" << s.mean << ',' << "\"p50\":" << s.p50 << ',' << "\"p90\":" << s.p90 << ','
-        << "\"p99\":" << s.p99 << ',' << "\"p999\":" << s.p999 << '}';
+    out << '"' << name << "\":{";
+    out << "\"count\":" << s.count;
+    out << ",\"min\":" << s.min;
+    out << ",\"max\":" << s.max;
+    out << ",\"mean\":" << s.mean;
+    out << ",\"p50\":" << s.p50;
+    out << ",\"p90\":" << s.p90;
+    out << ",\"p99\":" << s.p99;
+    out << ",\"p999\":" << s.p999;
+    out << '}';
   }
   out << '}';
 

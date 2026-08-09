@@ -126,16 +126,27 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Pinned to a major version on purpose. The unversioned `clang-format`
-      # package tracks whatever the runner image currently defaults to, so an
-      # image bump silently reformats the world and turns this job red on a
-      # commit that changed nothing. Contributors install the same one:
-      #   sudo apt-get install clang-format-18 clang-tidy-18
+      # clang-format comes from PyPI at an exact version, not from apt.
+      #
+      # Pinning the apt package to a major version is not enough: Ubuntu 24.04
+      # ships 18.1.3 and 18.1.8 formats differently, so a tree formatted on one
+      # fails the check on the other. The PyPI wheel is one specific LLVM
+      # build, which makes CI and a contributor's machine run literally the
+      # same binary. Reproduce locally with:
+      #
+      #   python3 -m venv ~/.cf && ~/.cf/bin/pip install clang-format==18.1.8
+      #   ~/.cf/bin/clang-format -i <files>
+      #
+      # clang-tidy stays on apt: it reports warnings rather than gating on
+      # them, so version drift there cannot redden the build.
       - name: Install tools
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang-format-18 clang-tidy-18 cmake ninja-build libgtest-dev
+            clang-tidy-18 cmake ninja-build libgtest-dev
+          python3 -m venv "$HOME/.cf"
+          "$HOME/.cf/bin/pip" install --quiet clang-format==18.1.8
+          "$HOME/.cf/bin/clang-format" --version
 
       # Grouped with \( \) and NUL-separated: without the parentheses the -o
       # binds only the last -name, and without -print0 a path containing a
@@ -143,7 +154,7 @@ jobs:
       - name: clang-format
         run: |
           find include src apps tests \( -name '*.hpp' -o -name '*.cpp' \) -print0 \
-            | xargs -0 clang-format-18 --dry-run --Werror
+            | xargs -0 "$HOME/.cf/bin/clang-format" --dry-run --Werror
 
       # The dashboard is hex-encoded into a generated header at *build* time, so
       # configuring alone leaves bourse/dashboard_asset.hpp missing and
