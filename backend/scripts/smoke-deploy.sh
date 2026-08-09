@@ -13,7 +13,16 @@ set -uo pipefail
 
 backend_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 frontend_dir="$(cd "$backend_root/../frontend" && pwd)"
-server_bin="$backend_root/build/bin/bourse-server"
+
+# $BOURSE_BUILD_DIR matches the other smoke scripts, so a sanitizer or
+# alternate-compiler tree can be exercised without a second copy of the suite.
+# Absolute paths are honoured too: builds on a 9p mount are several times
+# slower than the same build on the Linux filesystem.
+build_dir="${BOURSE_BUILD_DIR:-build}"
+case "$build_dir" in
+  /*) server_bin="$build_dir/bin/bourse-server" ;;
+  *) server_bin="$backend_root/$build_dir/bin/bourse-server" ;;
+esac
 http_port=18080
 static_port=13000
 static_origin="http://localhost:$static_port"

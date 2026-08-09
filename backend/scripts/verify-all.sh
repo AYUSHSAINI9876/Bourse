@@ -31,12 +31,16 @@ stage() {
 
 stage "build (RelWithDebInfo, tests on)" bash scripts/build.sh
 
-if [[ ! -x build/bin/bourse_tests ]]; then
-  echo "build produced no test binary; aborting" >&2
+# Honour $BOURSE_BUILD_DIR like every script this one calls, so the whole
+# suite can be pointed at a sanitizer tree or a build on a faster filesystem.
+BUILD_DIR="${BOURSE_BUILD_DIR:-build}"
+
+if [[ ! -x "$BUILD_DIR/bin/bourse_tests" ]]; then
+  echo "build produced no test binary in $BUILD_DIR; aborting" >&2
   exit 1
 fi
 
-stage "unit and integration tests" env BOURSE_LOG_LEVEL=off ./build/bin/bourse_tests --gtest_brief=1
+stage "unit and integration tests" env BOURSE_LOG_LEVEL=off "$BUILD_DIR/bin/bourse_tests" --gtest_brief=1
 stage "smoke: keyspace over redis-cli"  bash scripts/smoke-test.sh 6390
 stage "smoke: HTTP and matching engine" bash scripts/smoke-exchange.sh 6392 8092
 stage "smoke: crash recovery"           bash scripts/smoke-persistence.sh 6393

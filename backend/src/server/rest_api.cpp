@@ -8,11 +8,10 @@
 #include "bourse/cache/keyspace.hpp"
 #include "bourse/core/clock.hpp"
 #include "bourse/core/metrics.hpp"
+#include "bourse/dashboard_asset.hpp"
 #include "bourse/match/matching_engine.hpp"
 #include "bourse/net/resp_codec.hpp"
 #include "bourse/sql/engine.hpp"
-
-#include "bourse/dashboard_asset.hpp"
 
 namespace bourse::server {
 namespace {
@@ -120,100 +119,97 @@ std::string roleJson(auth::Role role) {
 }  // namespace
 
 net::Middleware makeRestAuthMiddleware(exec::ServerContext& context) {
-  return [&context](net::HttpRequest& request, net::HttpResponse& response,
-                    const std::function<void()>& next) {
-    auth::AuthService* service = context.auth;
+  return
+      [&context](net::HttpRequest& request, net::HttpResponse& response, const std::function<void()>& next) {
+        auth::AuthService* service = context.auth;
 
-    // Resolve a token whenever one is presented, even with enforcement off.
-    // It costs one hash lookup and it means `/api/auth/me` and the dashboard's
-    // identity display behave identically in both modes.
-    if (service != nullptr) {
-      const std::string token = bearerTokenOf(request);
-      if (!token.empty()) {
-        Result<auth::Principal> principal = service->authenticate(token);
-        if (principal.ok()) {
-          request.principal = std::move(principal).value();
+        // Resolve a token whenever one is presented, even with enforcement off.
+        // It costs one hash lookup and it means `/api/auth/me` and the dashboard's
+        // identity display behave identically in both modes.
+        if (service != nullptr) {
+          const std::string token = bearerTokenOf(request);
+          if (!token.empty()) {
+            Result<auth::Principal> principal = service->authenticate(token);
+            if (principal.ok()) {
+              request.principal = std::move(principal).value();
+            }
+          }
         }
-      }
-    }
 
-    if (service == nullptr || !service->enabled() || isPublicPath(request.path)) {
-      next();
-      return;
-    }
+        if (service == nullptr || !service->enabled() || isPublicPath(request.path)) {
+          next();
+          return;
+        }
 
-    if (!request.principal.authenticated()) {
-      response = net::HttpResponse::json(
-          R"({"error":"authentication required","code":"NOAUTH"})", 401);
-      // RFC 7235 requires a challenge on a 401. Browsers use it to decide
-      // whether to prompt; omitting it makes fetch() failures harder to
-      // diagnose than they need to be.
-      response.setHeader("WWW-Authenticate", "Bearer realm=\"bourse\"");
-      return;
-    }
+        if (!request.principal.authenticated()) {
+          response = net::HttpResponse::json(R"({"error":"authentication required","code":"NOAUTH"})", 401);
+          // RFC 7235 requires a challenge on a 401. Browsers use it to decide
+          // whether to prompt; omitting it makes fetch() failures harder to
+          // diagnose than they need to be.
+          response.setHeader("WWW-Authenticate", "Bearer realm=\"bourse\"");
+          return;
+        }
 
-    // Coarse gate only. Finer-grained write and admin checks happen in the
-    // command registry, which both protocols share -- doing them here as well
-    // would be a second copy of the policy, free to drift from the first.
-    next();
-  };
+        // Coarse gate only. Finer-grained write and admin checks happen in the
+        // command registry, which both protocols share -- doing them here as well
+        // would be a second copy of the policy, free to drift from the first.
+        next();
+      };
 }
 
 void buildAuthApi(net::Router& router, exec::ServerContext& context) {
   const auto requireAuthService = [&context](net::HttpResponse& response) -> auth::AuthService* {
     if (context.auth == nullptr) {
-      response = net::HttpResponse::json(
-          R"({"error":"authentication is not configured on this server"})", 501);
+      response =
+          net::HttpResponse::json(R"({"error":"authentication is not configured on this server"})", 501);
       return nullptr;
     }
     return context.auth;
   };
 
   // ---- login ------------------------------------------------------------
-  router.post("/api/auth/login", [&context, requireAuthService](const net::HttpRequest& request,
-                                                                net::HttpResponse& response) {
-    auth::AuthService* service = requireAuthService(response);
-    if (service == nullptr) {
-      return;
-    }
+  router.post(
+      "/api/auth/login", [requireAuthService](const net::HttpRequest& request, net::HttpResponse& response) {
+        auth::AuthService* service = requireAuthService(response);
+        if (service == nullptr) {
+          return;
+        }
 
-    // Credentials arrive in the body, never the query string: query strings
-    // land in proxy logs, browser history and Referer headers.
-    const std::string username = net::jsonFieldOf(request.body, "username");
-    const std::string password = net::jsonFieldOf(request.body, "password");
-    if (username.empty() || password.empty()) {
-      response = net::HttpResponse::json(
-          R"({"error":"username and password are required"})", 400);
-      return;
-    }
+        // Credentials arrive in the body, never the query string: query strings
+        // land in proxy logs, browser history and Referer headers.
+        const std::string username = net::jsonFieldOf(request.body, "username");
+        const std::string password = net::jsonFieldOf(request.body, "password");
+        if (username.empty() || password.empty()) {
+          response = net::HttpResponse::json(R"({"error":"username and password are required"})", 400);
+          return;
+        }
 
-    Result<auth::LoginResult> login = service->login(username, password, clientIdOf(request));
-    if (!login.ok()) {
-      // 429 for the throttle, 401 for bad credentials. A client that cannot
-      // tell them apart retries into a longer lockout.
-      const bool throttled = login.status().code() == ErrorCode::kUnsupported;
-      response = net::HttpResponse::json(
-          "{\"error\":" + jsonString(login.status().message()) + "}", throttled ? 429 : 401);
-      if (!throttled) {
-        response.setHeader("WWW-Authenticate", "Bearer realm=\"bourse\"");
-      }
-      return;
-    }
+        Result<auth::LoginResult> login = service->login(username, password, clientIdOf(request));
+        if (!login.ok()) {
+          // 429 for the throttle, 401 for bad credentials. A client that cannot
+          // tell them apart retries into a longer lockout.
+          const bool throttled = login.status().code() == ErrorCode::kUnsupported;
+          response = net::HttpResponse::json("{\"error\":" + jsonString(login.status().message()) + "}",
+                                             throttled ? 429 : 401);
+          if (!throttled) {
+            response.setHeader("WWW-Authenticate", "Bearer realm=\"bourse\"");
+          }
+          return;
+        }
 
-    std::string payload = "{\"token\":" + jsonString(login.value().token);
-    payload += ",\"username\":" + jsonString(login.value().username);
-    payload += ",\"role\":" + roleJson(login.value().role);
-    payload += ",\"expires_at_ms\":" + std::to_string(login.value().expires_at_ms);
-    payload += "}";
-    response = net::HttpResponse::json(std::move(payload));
-    // The token must not be cached anywhere -- not by the browser, not by a
-    // proxy, not by the CDN in front of the dashboard.
-    response.setHeader("Cache-Control", "no-store");
-  });
+        std::string payload = "{\"token\":" + jsonString(login.value().token);
+        payload += ",\"username\":" + jsonString(login.value().username);
+        payload += ",\"role\":" + roleJson(login.value().role);
+        payload += ",\"expires_at_ms\":" + std::to_string(login.value().expires_at_ms);
+        payload += "}";
+        response = net::HttpResponse::json(std::move(payload));
+        // The token must not be cached anywhere -- not by the browser, not by a
+        // proxy, not by the CDN in front of the dashboard.
+        response.setHeader("Cache-Control", "no-store");
+      });
 
   // ---- logout -----------------------------------------------------------
-  router.post("/api/auth/logout", [&context](const net::HttpRequest& request,
-                                             net::HttpResponse& response) {
+  router.post("/api/auth/logout", [&context](const net::HttpRequest& request, net::HttpResponse& response) {
     if (context.auth == nullptr) {
       response = net::HttpResponse::json(R"({"ok":true})");
       return;
@@ -253,8 +249,8 @@ void buildAuthApi(net::Router& router, exec::ServerContext& context) {
     return false;
   };
 
-  router.get("/api/auth/users", [&context, requireAuthService, requireAdmin](
-                                    const net::HttpRequest& request, net::HttpResponse& response) {
+  router.get("/api/auth/users", [requireAuthService, requireAdmin](const net::HttpRequest& request,
+                                                                   net::HttpResponse& response) {
     auth::AuthService* service = requireAuthService(response);
     if (service == nullptr || !requireAdmin(request, response)) {
       return;
@@ -274,8 +270,8 @@ void buildAuthApi(net::Router& router, exec::ServerContext& context) {
     response = net::HttpResponse::json(std::move(payload));
   });
 
-  router.post("/api/auth/users", [&context, requireAuthService, requireAdmin](
-                                     const net::HttpRequest& request, net::HttpResponse& response) {
+  router.post("/api/auth/users", [requireAuthService, requireAdmin](const net::HttpRequest& request,
+                                                                    net::HttpResponse& response) {
     auth::AuthService* service = requireAuthService(response);
     if (service == nullptr || !requireAdmin(request, response)) {
       return;
@@ -285,8 +281,7 @@ void buildAuthApi(net::Router& router, exec::ServerContext& context) {
     const std::string role_text = net::jsonFieldOf(request.body, "role");
     auth::Role role{};
     if (!auth::parseRole(role_text, role)) {
-      response = net::HttpResponse::json(
-          R"({"error":"role must be one of: viewer, trader, admin"})", 400);
+      response = net::HttpResponse::json(R"({"error":"role must be one of: viewer, trader, admin"})", 400);
       return;
     }
     const Status added = service->addUser(username, password, role);
@@ -298,17 +293,16 @@ void buildAuthApi(net::Router& router, exec::ServerContext& context) {
     response = net::HttpResponse::json(R"({"ok":true})", 201);
   });
 
-  router.del("/api/auth/users/:username", [&context, requireAuthService, requireAdmin](
-                                               const net::HttpRequest& request,
-                                               net::HttpResponse& response) {
+  router.del("/api/auth/users/:username", [requireAuthService, requireAdmin](const net::HttpRequest& request,
+                                                                             net::HttpResponse& response) {
     auth::AuthService* service = requireAuthService(response);
     if (service == nullptr || !requireAdmin(request, response)) {
       return;
     }
     const std::string username = request.pathParam("username");
     if (username == request.principal.username) {
-      response = net::HttpResponse::json(
-          R"({"error":"cannot delete the account you are authenticated as"})", 400);
+      response =
+          net::HttpResponse::json(R"({"error":"cannot delete the account you are authenticated as"})", 400);
       return;
     }
     const Status removed = service->removeUser(username);
@@ -363,7 +357,8 @@ void buildRestApi(net::Router& router, exec::ServerContext& context, const exec:
       payload.append(",\"resting_orders\":").append(std::to_string(engine.resting_orders));
     }
 
-    const Histogram::Snapshot command = MetricsRegistry::instance().histogram("bourse_command_latency_nanos").snapshot();
+    const Histogram::Snapshot command =
+        MetricsRegistry::instance().histogram("bourse_command_latency_nanos").snapshot();
     payload.append(",\"command_latency\":{\"count\":").append(std::to_string(command.count));
     payload.append(",\"p50\":").append(std::to_string(command.p50));
     payload.append(",\"p90\":").append(std::to_string(command.p90));
@@ -371,7 +366,8 @@ void buildRestApi(net::Router& router, exec::ServerContext& context, const exec:
     payload.append(",\"p999\":").append(std::to_string(command.p999));
     payload.append(",\"max\":").append(std::to_string(command.max)).append("}");
 
-    const Histogram::Snapshot matching = MetricsRegistry::instance().histogram("bourse_match_latency_nanos").snapshot();
+    const Histogram::Snapshot matching =
+        MetricsRegistry::instance().histogram("bourse_match_latency_nanos").snapshot();
     payload.append(",\"match_latency\":{\"count\":").append(std::to_string(matching.count));
     payload.append(",\"p50\":").append(std::to_string(matching.p50));
     payload.append(",\"p99\":").append(std::to_string(matching.p99)).append("}");
@@ -379,47 +375,53 @@ void buildRestApi(net::Router& router, exec::ServerContext& context, const exec:
     payload.append(",\"connections\":")
         .append(std::to_string(MetricsRegistry::instance().gauge("bourse_connections_active").value()));
     payload.append(",\"commands_processed\":")
-        .append(std::to_string(MetricsRegistry::instance().counter("bourse_commands_processed_total").value()));
+        .append(
+            std::to_string(MetricsRegistry::instance().counter("bourse_commands_processed_total").value()));
     payload.push_back('}');
 
     response = net::HttpResponse::json(std::move(payload));
   });
 
   // ---- keyspace ---------------------------------------------------------
-  router.get("/api/keys", [&context, &registry](const net::HttpRequest& request, net::HttpResponse& response) {
-    dispatchAsJson(context, registry, request, {"KEYS", request.queryParam("pattern", "*")}, response);
-  });
+  router.get(
+      "/api/keys", [&context, &registry](const net::HttpRequest& request, net::HttpResponse& response) {
+        dispatchAsJson(context, registry, request, {"KEYS", request.queryParam("pattern", "*")}, response);
+      });
 
-  router.get("/api/keys/:key", [&context, &registry](const net::HttpRequest& request, net::HttpResponse& response) {
-    dispatchAsJson(context, registry, request, {"GET", request.pathParam("key")}, response);
-  });
+  router.get("/api/keys/:key",
+             [&context, &registry](const net::HttpRequest& request, net::HttpResponse& response) {
+               dispatchAsJson(context, registry, request, {"GET", request.pathParam("key")}, response);
+             });
 
-  router.put("/api/keys/:key", [&context, &registry](const net::HttpRequest& request, net::HttpResponse& response) {
-    std::vector<std::string> argv = {"SET", request.pathParam("key"), request.body};
-    const std::string ttl = request.queryParam("ex");
-    if (!ttl.empty()) {
-      argv.emplace_back("EX");
-      argv.push_back(ttl);
-    }
-    dispatchAsJson(context, registry, request, argv, response);
-  });
+  router.put("/api/keys/:key",
+             [&context, &registry](const net::HttpRequest& request, net::HttpResponse& response) {
+               std::vector<std::string> argv = {"SET", request.pathParam("key"), request.body};
+               const std::string ttl = request.queryParam("ex");
+               if (!ttl.empty()) {
+                 argv.emplace_back("EX");
+                 argv.push_back(ttl);
+               }
+               dispatchAsJson(context, registry, request, argv, response);
+             });
 
-  router.del("/api/keys/:key", [&context, &registry](const net::HttpRequest& request, net::HttpResponse& response) {
-    dispatchAsJson(context, registry, request, {"DEL", request.pathParam("key")}, response);
-  });
+  router.del("/api/keys/:key",
+             [&context, &registry](const net::HttpRequest& request, net::HttpResponse& response) {
+               dispatchAsJson(context, registry, request, {"DEL", request.pathParam("key")}, response);
+             });
 
   // ---- generic command passthrough --------------------------------------
-  router.post("/api/command", [&context, &registry](const net::HttpRequest& request, net::HttpResponse& response) {
-    bool ok = false;
-    // Reuses the RESP inline splitter so quoting behaves identically over
-    // both transports.
-    const std::vector<std::string> argv = net::splitInlineCommand(request.body, &ok);
-    if (!ok) {
-      response = net::HttpResponse::error(400, "unbalanced quotes in command");
-      return;
-    }
-    dispatchAsJson(context, registry, request, argv, response);
-  });
+  router.post("/api/command",
+              [&context, &registry](const net::HttpRequest& request, net::HttpResponse& response) {
+                bool ok = false;
+                // Reuses the RESP inline splitter so quoting behaves identically over
+                // both transports.
+                const std::vector<std::string> argv = net::splitInlineCommand(request.body, &ok);
+                if (!ok) {
+                  response = net::HttpResponse::error(400, "unbalanced quotes in command");
+                  return;
+                }
+                dispatchAsJson(context, registry, request, argv, response);
+              });
 
   // ---- SQL --------------------------------------------------------------
   router.post("/api/sql", [&context](const net::HttpRequest& request, net::HttpResponse& response) {
@@ -453,9 +455,10 @@ void buildRestApi(net::Router& router, exec::ServerContext& context, const exec:
   });
 
   // ---- exchange ---------------------------------------------------------
-  router.get("/api/symbols", [&context, &registry](const net::HttpRequest& request, net::HttpResponse& response) {
-    dispatchAsJson(context, registry, request, {"SYMBOLS"}, response);
-  });
+  router.get("/api/symbols",
+             [&context, &registry](const net::HttpRequest& request, net::HttpResponse& response) {
+               dispatchAsJson(context, registry, request, {"SYMBOLS"}, response);
+             });
 
   router.get("/api/book/:symbol", [&context](const net::HttpRequest& request, net::HttpResponse& response) {
     if (context.matching_engine == nullptr) {
@@ -487,8 +490,7 @@ void buildRestApi(net::Router& router, exec::ServerContext& context, const exec:
     payload.append(",\"bids\":").append(side(snapshot->bids));
     payload.append(",\"asks\":").append(side(snapshot->asks));
     const std::optional<match::Price> last = context.matching_engine->lastTradePrice(symbol);
-    payload.append(",\"last\":")
-        .append(last.has_value() ? jsonString(match::formatPrice(*last)) : "null");
+    payload.append(",\"last\":").append(last.has_value() ? jsonString(match::formatPrice(*last)) : "null");
     payload.push_back('}');
     response = net::HttpResponse::json(std::move(payload));
   });
@@ -516,25 +518,26 @@ void buildRestApi(net::Router& router, exec::ServerContext& context, const exec:
     response = net::HttpResponse::json(std::move(payload));
   });
 
-  router.post("/api/orders", [&context, &registry](const net::HttpRequest& request, net::HttpResponse& response) {
-    std::vector<std::string> argv = {"ORDER", request.queryParam("symbol"), request.queryParam("side"),
-                                     request.queryParam("type", "LIMIT"), request.queryParam("quantity")};
-    const std::string price = request.queryParam("price");
-    if (!price.empty()) {
-      argv.push_back(price);
-    }
-    const std::string tif = request.queryParam("tif");
-    if (!tif.empty()) {
-      argv.push_back(tif);
-    }
-    dispatchAsJson(context, registry, request, argv, response);
-  });
+  router.post(
+      "/api/orders", [&context, &registry](const net::HttpRequest& request, net::HttpResponse& response) {
+        std::vector<std::string> argv = {"ORDER", request.queryParam("symbol"), request.queryParam("side"),
+                                         request.queryParam("type", "LIMIT"), request.queryParam("quantity")};
+        const std::string price = request.queryParam("price");
+        if (!price.empty()) {
+          argv.push_back(price);
+        }
+        const std::string tif = request.queryParam("tif");
+        if (!tif.empty()) {
+          argv.push_back(tif);
+        }
+        dispatchAsJson(context, registry, request, argv, response);
+      });
 
-  router.del("/api/orders/:symbol/:id", [&context, &registry](const net::HttpRequest& request,
-                                                              net::HttpResponse& response) {
-    dispatchAsJson(context, registry, request, {"CANCEL", request.pathParam("symbol"), request.pathParam("id")},
-                   response);
-  });
+  router.del("/api/orders/:symbol/:id",
+             [&context, &registry](const net::HttpRequest& request, net::HttpResponse& response) {
+               dispatchAsJson(context, registry, request,
+                              {"CANCEL", request.pathParam("symbol"), request.pathParam("id")}, response);
+             });
 }
 
 }  // namespace bourse::server

@@ -22,7 +22,13 @@
 set -uo pipefail
 
 backend_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-checker="$backend_root/build/bin/bourse-crypto-check"
+# $BOURSE_BUILD_DIR matches the other scripts, so an alternate build tree can
+# be checked without a second copy of this one. Absolute paths are honoured.
+build_dir="${BOURSE_BUILD_DIR:-build}"
+case "$build_dir" in
+  /*) checker="$build_dir/bin/bourse-crypto-check" ;;
+  *) checker="$backend_root/$build_dir/bin/bourse-crypto-check" ;;
+esac
 cases="${1:-400}"
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT

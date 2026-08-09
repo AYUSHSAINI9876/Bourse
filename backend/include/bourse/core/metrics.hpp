@@ -24,24 +24,32 @@ namespace bourse {
 class Counter {
  public:
   void increment(std::uint64_t delta = 1) noexcept { value_.fetch_add(delta, std::memory_order_relaxed); }
+
   [[nodiscard]] std::uint64_t value() const noexcept { return value_.load(std::memory_order_relaxed); }
+
   void reset() noexcept { value_.store(0, std::memory_order_relaxed); }
 
  private:
   alignas(kCacheLineSize) std::atomic<std::uint64_t> value_{0};
-  char padding_[kCacheLineSize - sizeof(std::atomic<std::uint64_t>)]{};
+  // Never read: its only job is to fill the rest of the cache line so the
+  // next counter starts on a fresh one. Clang flags unread private fields,
+  // and it is right that nothing uses this -- that is the point.
+  [[maybe_unused]] char padding_[kCacheLineSize - sizeof(std::atomic<std::uint64_t>)]{};
 };
 
 class Gauge {
  public:
   void set(std::int64_t v) noexcept { value_.store(v, std::memory_order_relaxed); }
+
   void add(std::int64_t d) noexcept { value_.fetch_add(d, std::memory_order_relaxed); }
+
   void subtract(std::int64_t d) noexcept { value_.fetch_sub(d, std::memory_order_relaxed); }
+
   [[nodiscard]] std::int64_t value() const noexcept { return value_.load(std::memory_order_relaxed); }
 
  private:
   alignas(kCacheLineSize) std::atomic<std::int64_t> value_{0};
-  char padding_[kCacheLineSize - sizeof(std::atomic<std::int64_t>)]{};
+  [[maybe_unused]] char padding_[kCacheLineSize - sizeof(std::atomic<std::int64_t>)]{};
 };
 
 /// Fixed-bucket logarithmic histogram, the same scheme HdrHistogram uses.
@@ -56,15 +64,19 @@ class Gauge {
 class Histogram {
  public:
   static constexpr int kSubBucketBits = 4;
-  static constexpr int kSubBucketCount = 1 << kSubBucketBits;  // 16
+  static constexpr int kSubBucketCount = 1 << kSubBucketBits;   // 16
   static constexpr int kBucketCount = 64 - kSubBucketBits + 1;  // 61
 
   void record(std::uint64_t value) noexcept;
 
   [[nodiscard]] std::uint64_t count() const noexcept { return count_.load(std::memory_order_relaxed); }
+
   [[nodiscard]] std::uint64_t sum() const noexcept { return sum_.load(std::memory_order_relaxed); }
+
   [[nodiscard]] std::uint64_t min() const noexcept;
+
   [[nodiscard]] std::uint64_t max() const noexcept { return max_.load(std::memory_order_relaxed); }
+
   [[nodiscard]] double mean() const noexcept;
 
   /// `percentile(99.0)` returns the smallest recorded magnitude at or below
@@ -83,6 +95,7 @@ class Histogram {
     std::uint64_t p99 = 0;
     std::uint64_t p999 = 0;
   };
+
   [[nodiscard]] Snapshot snapshot() const noexcept;
 
  private:

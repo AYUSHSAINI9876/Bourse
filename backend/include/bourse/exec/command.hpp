@@ -14,15 +14,19 @@
 namespace bourse::auth {
 class AuthService;
 }
+
 namespace bourse::cache {
 class Keyspace;
 }
+
 namespace bourse::match {
 class MatchingEngine;
 }
+
 namespace bourse::sql {
 class Engine;
 }
+
 namespace bourse::net {
 class Connection;
 }
@@ -58,6 +62,20 @@ struct ServerContext {
 };
 
 struct CommandContext {
+  /// A constructor rather than plain aggregate initialisation.
+  ///
+  /// With four members, three of them defaulted, `{server, connection}` is
+  /// valid C++ but trips `-Wmissing-field-initializers` -- which `-Wextra`
+  /// enables and CI promotes to an error. Every call site would otherwise have
+  /// to spell out all four fields, and forgetting one breaks the build rather
+  /// than doing the obvious thing. This makes the short form correct.
+  explicit CommandContext(ServerContext& server_context, net::Connection* client = nullptr,
+                          auth::Principal caller = {}, std::string caller_id = {})
+      : server(server_context),
+        connection(client),
+        principal(std::move(caller)),
+        client_id(std::move(caller_id)) {}
+
   ServerContext& server;
   /// Null when the command arrives over REST rather than RESP. Commands that
   /// genuinely need a connection (SUBSCRIBE) check for this and error out.
@@ -107,8 +125,10 @@ class Command {
   /// above so that adding a command cannot accidentally leave a permission
   /// unset -- the default is the safe one, and a verb opts *down*.
   [[nodiscard]] auth::Role requiredRole() const noexcept {
-    if (isNoAuth()) return auth::Role::kAnonymous;
-    if (isAdmin()) return auth::Role::kAdmin;
+    if (isNoAuth())
+      return auth::Role::kAnonymous;
+    if (isAdmin())
+      return auth::Role::kAdmin;
     return isWrite() ? auth::Role::kTrader : auth::Role::kViewer;
   }
 
@@ -145,10 +165,15 @@ class LambdaCommand final : public Command {
         is_no_auth_(is_no_auth) {}
 
   [[nodiscard]] std::string_view name() const noexcept override { return name_; }
+
   [[nodiscard]] int arity() const noexcept override { return arity_; }
+
   [[nodiscard]] bool isWrite() const noexcept override { return is_write_; }
+
   [[nodiscard]] bool isAdmin() const noexcept override { return is_admin_; }
+
   [[nodiscard]] bool isNoAuth() const noexcept override { return is_no_auth_; }
+
   [[nodiscard]] std::string_view summary() const noexcept override { return summary_; }
 
   Reply execute(CommandContext& context, const std::vector<std::string>& argv) override {
@@ -183,6 +208,7 @@ class CommandRegistry {
   Reply dispatch(CommandContext& context, const std::vector<std::string>& argv) const;
 
   [[nodiscard]] std::vector<std::string> commandNames() const;
+
   [[nodiscard]] std::size_t size() const noexcept { return commands_.size(); }
 
   /// Builds the registry with every built-in verb installed.
