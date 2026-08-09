@@ -10,6 +10,11 @@ PointerAlignment: Left
 AllowShortFunctionsOnASingleLine: Inline
 AllowShortIfStatementsOnASingleLine: false
 AllowShortLoopsOnASingleLine: false
+# Enum-to-string lookup tables read as tables when each case is one line, and
+# as noise when Google style splits them across two. There are ~95 of them
+# here, all deliberate, so the config describes the style the code actually
+# uses rather than fighting it.
+AllowShortCaseLabelsOnASingleLine: true
 AlwaysBreakTemplateDeclarations: Yes
 BinPackArguments: true
 BinPackParameters: true
