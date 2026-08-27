@@ -232,6 +232,16 @@
     <input id="lu" autocomplete="username" autocapitalize="off" spellcheck="false" required>
     <label for="lp">Password</label>
     <input id="lp" type="password" autocomplete="current-password" required>
+
+    <!-- Revealed only after the server answers TOTP_REQUIRED. Showing it to
+         everyone would imply every account needs a code, and asking for one
+         before the password is checked would leak which accounts have 2FA. -->
+    <div id="totpRow" hidden>
+      <label for="lt">Authentication code</label>
+      <input id="lt" inputmode="numeric" autocomplete="one-time-code" maxlength="8"
+             placeholder="123456" style="letter-spacing:.25em;font:15px/1 var(--mono)">
+    </div>
+
     <button type="submit" id="loginBtn">Sign in</button>
     <div class="gate-msg" id="loginMsg"></div>
   </form>
@@ -372,6 +382,60 @@ Arrow keys walk the history.</div>
       <div class="hint">
         <code>CREATE TABLE</code> · <code>INSERT</code> · <code>SELECT … WHERE … ORDER BY … LIMIT</code> ·
         <code>UPDATE</code> · <code>DELETE</code>. <b>Explain</b> prints the query plan with row counts.
+      </div>
+    </section>
+
+    <section class="card" id="securityCard" hidden>
+      <h2>Security <span class="right hint" id="twofaState" style="margin:0"></span></h2>
+
+      <div id="twofaOff">
+        <div class="hint" style="margin:0 0 9px">
+          Two-factor uses TOTP (RFC 6238) generated in this server — no third-party
+          service. Works with Google Authenticator, Authy or 1Password.
+        </div>
+        <button type="button" id="twofaBegin">Set up two-factor</button>
+      </div>
+
+      <div id="twofaEnrol" hidden>
+        <div class="hint" style="margin:0 0 6px">
+          Add this secret to your authenticator app, then enter the code it shows.
+        </div>
+        <div class="out" id="twofaSecret" style="margin-top:0"></div>
+        <div class="form" style="margin-top:9px">
+          <div>
+            <label for="twofaCode">Code from your app</label>
+            <input id="twofaCode" inputmode="numeric" maxlength="8" placeholder="123456">
+          </div>
+          <div><button type="button" id="twofaConfirm">Confirm</button></div>
+          <div><button type="button" class="ghost" id="twofaCancel">Cancel</button></div>
+        </div>
+        <div class="hint" id="twofaMsg"></div>
+      </div>
+
+      <div id="twofaOn" hidden>
+        <div class="hint" style="margin:0 0 9px">
+          Two-factor is on. Disabling it needs your password, so an unattended
+          session cannot quietly remove it.
+        </div>
+        <div class="form">
+          <div>
+            <label for="twofaPass">Password</label>
+            <input id="twofaPass" type="password" autocomplete="current-password">
+          </div>
+          <div><button type="button" class="ghost" id="twofaDisable">Turn off</button></div>
+        </div>
+        <div class="hint" id="twofaOffMsg"></div>
+      </div>
+
+      <h2 style="margin-top:18px">Active sessions
+        <span class="right"><button type="button" class="ghost" id="revokeOthers"
+              style="padding:3px 9px">Sign out other devices</button></span>
+      </h2>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Started</th><th>Client</th><th>Expires</th><th></th></tr></thead>
+          <tbody id="sessionRows"></tbody>
+        </table>
       </div>
     </section>
 
@@ -517,6 +581,14 @@ function applyIdentity(identity) {
   $("usersCard").hidden = !(signedIn && identity.role === "admin");
   if (!$("usersCard").hidden) { loadUsers(); }
 
+  // Security applies to whoever is signed in, whatever their role: a viewer
+  // has just as much reason to enable two-factor as an administrator.
+  $("securityCard").hidden = !signedIn;
+  if (signedIn) {
+    renderTwofa(!!identity.totp_enabled);
+    loadSessions();
+  }
+
   // Viewers cannot write, so the controls that would only ever fail are
   // disabled rather than left to produce a permission error on every click.
   const canWrite = !authRequired || identity.role === "trader" || identity.role === "admin";
@@ -560,11 +632,17 @@ $("loginForm").addEventListener("submit", async (event) => {
     const result = await api("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: $("lu").value, password: $("lp").value }),
+      body: JSON.stringify({
+        username: $("lu").value,
+        password: $("lp").value,
+        totp: $("lt").value.trim(),
+      }),
     });
     token = result.token;
     writeStored(kTokenKey, token);
     $("lp").value = "";
+    $("lt").value = "";
+    $("totpRow").hidden = true;
     $("loginMsg").innerHTML = '<span class="ok">Signed in.</span>';
     await loadIdentity();
     refresh();
@@ -572,7 +650,16 @@ $("loginForm").addEventListener("submit", async (event) => {
   } catch (e) {
     // `api()` clears the token on a 401, which would otherwise wipe the one
     // we are trying to obtain -- harmless here, since login has no token yet.
-    $("loginMsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>";
+    //
+    // A demand for a second factor is a prompt, not a rejection: reveal the
+    // field and say so, rather than implying the password was wrong.
+    if (/two-factor code required/i.test(e.message)) {
+      $("totpRow").hidden = false;
+      $("loginMsg").innerHTML = '<span class="hint">Enter the code from your authenticator app.</span>';
+      setTimeout(() => $("lt").focus(), 30);
+    } else {
+      $("loginMsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>";
+    }
   } finally {
     button.disabled = false;
   }
@@ -624,6 +711,121 @@ $("addUser").onclick = async () => {
     toast("User created", "good");
     loadUsers();
   } catch (e) { toast(e.message, "bad"); }
+};
+
+// ---------------------------------------------------------------------------
+// Two-factor and sessions
+// ---------------------------------------------------------------------------
+
+function renderTwofa(enabled) {
+  $("twofaState").textContent = enabled ? "two-factor on" : "two-factor off";
+  $("twofaOff").hidden = enabled;
+  $("twofaOn").hidden = !enabled;
+  $("twofaEnrol").hidden = true;
+}
+
+$("twofaBegin").onclick = async () => {
+  try {
+    const result = await api("/api/auth/2fa/begin", { method: "POST" });
+    // The secret is shown once. Grouped in fours because people transcribe
+    // these by hand and an unbroken 32-character string is unreadable.
+    const grouped = (result.secret || "").replace(/=+$/, "").replace(/(.{4})/g, "$1 ").trim();
+    $("twofaSecret").innerHTML =
+      "<b>Secret</b>
+" + esc(grouped) + "
+
+<b>Or paste this URI into your app</b>
+" + esc(result.uri);
+    $("twofaOff").hidden = true;
+    $("twofaEnrol").hidden = false;
+    $("twofaMsg").textContent = "";
+    setTimeout(() => $("twofaCode").focus(), 30);
+  } catch (e) {
+    toast(e.message, "bad");
+  }
+};
+
+$("twofaCancel").onclick = () => {
+  // Abandoning enrolment leaves the unconfirmed secret on the server, which is
+  // harmless: nothing is enforced until a working code confirms it, and the
+  // next enrolment overwrites it.
+  $("twofaEnrol").hidden = true;
+  $("twofaOff").hidden = false;
+  $("twofaCode").value = "";
+};
+
+$("twofaConfirm").onclick = async () => {
+  try {
+    await api("/api/auth/2fa/confirm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: $("twofaCode").value.trim() }),
+    });
+    $("twofaCode").value = "";
+    renderTwofa(true);
+    toast("Two-factor enabled", "good");
+  } catch (e) {
+    $("twofaMsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>";
+  }
+};
+
+$("twofaDisable").onclick = async () => {
+  try {
+    await api("/api/auth/2fa/disable", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: $("twofaPass").value }),
+    });
+    $("twofaPass").value = "";
+    $("twofaOffMsg").textContent = "";
+    renderTwofa(false);
+    toast("Two-factor disabled");
+  } catch (e) {
+    $("twofaOffMsg").innerHTML = '<span class="err">' + esc(e.message) + "</span>";
+  }
+};
+
+function formatWhen(ms) {
+  if (!ms) return "—";
+  const d = new Date(ms);
+  return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+async function loadSessions() {
+  try {
+    const result = await api("/api/auth/sessions");
+    $("sessionRows").innerHTML = (result.sessions || []).map(sn =>
+      `<tr><td>${esc(formatWhen(sn.created_at_ms))}${sn.current ? ' <span class="badge">this device</span>' : ""}</td>
+       <td>${esc(sn.client || "unknown")}</td>
+       <td>${esc(formatWhen(sn.expires_at_ms))}</td>
+       <td class="num">${sn.current ? "" :
+         `<button type="button" class="ghost" data-session="${esc(sn.id)}" style="padding:3px 8px">Revoke</button>`}</td></tr>`
+    ).join("") || `<tr><td colspan="4" class="empty">no active sessions</td></tr>`;
+  } catch (e) {
+    $("sessionRows").innerHTML = `<tr><td colspan="4" class="err">${esc(e.message)}</td></tr>`;
+  }
+}
+
+$("sessionRows").addEventListener("click", async (event) => {
+  const id = event.target.getAttribute("data-session");
+  if (!id) return;
+  try {
+    await api("/api/auth/sessions/" + encodeURIComponent(id), { method: "DELETE" });
+    toast("Session revoked", "good");
+    loadSessions();
+  } catch (e) {
+    toast(e.message, "bad");
+  }
+});
+
+$("revokeOthers").onclick = async () => {
+  try {
+    const result = await api("/api/auth/sessions/revoke-others", { method: "POST" });
+    toast(result.revoked ? `Signed out ${result.revoked} other session(s)` : "No other sessions", "good");
+    loadSessions();
+  } catch (e) {
+    toast(e.message, "bad");
+  }
 };
 
 // ---------------------------------------------------------------------------
