@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <ctime>
 #include <memory>
 #include <string>
 #include <thread>
@@ -18,6 +19,7 @@
 
 #include "bourse/auth/auth_service.hpp"
 #include "bourse/auth/crypto.hpp"
+#include "bourse/auth/totp.hpp"
 #include "bourse/cache/keyspace.hpp"
 #include "bourse/exec/command.hpp"
 #include "bourse/net/http_codec.hpp"
@@ -508,6 +510,190 @@ TEST(RoleTest, ParsesKnownNamesAndRejectsEverythingElse) {
   EXPECT_FALSE(parseRole("root", role));
   EXPECT_FALSE(parseRole("", role));
   EXPECT_FALSE(parseRole("anonymous", role));
+}
+
+// ---------------------------------------------------------------------------
+// Two-factor enrolment lifecycle
+// ---------------------------------------------------------------------------
+
+// Drives a real enrolment and returns the base32 secret, so the tests below
+// work against genuine codes rather than a stubbed verifier.
+std::string enrolAndConfirm(AuthService& service, const std::string& user) {
+  Result<TotpEnrolment> begun = service.beginTotpEnrolment(user, "Bourse");
+  EXPECT_TRUE(begun.ok()) << begun.status().toString();
+  const std::string secret = begun.value().base32_secret;
+
+  const Result<std::string> raw = base32Decode(secret);
+  EXPECT_TRUE(raw.ok());
+  const Result<std::string> code = totp(raw.value(), std::time(nullptr));
+  EXPECT_TRUE(code.ok());
+  EXPECT_TRUE(service.confirmTotpEnrolment(user, code.value()).ok());
+  return secret;
+}
+
+TEST(AuthServiceTotpTest, EnrolmentOnlyEnforcesAfterConfirmation) {
+  AuthService service(testConfig());
+  ASSERT_TRUE(service.addUser("alice", "hunter2-long-enough", Role::kTrader).ok());
+
+  ASSERT_TRUE(service.beginTotpEnrolment("alice", "Bourse").ok());
+  // Opening the setup screen must not lock the account: the secret is stored
+  // but unconfirmed, so a password-only login still succeeds.
+  EXPECT_FALSE(service.totpEnabled("alice"));
+  EXPECT_TRUE(service.login("alice", "hunter2-long-enough", "10.0.0.1").ok());
+}
+
+TEST(AuthServiceTotpTest, RefusesToReEnrolWhileEnabled) {
+  AuthService service(testConfig());
+  ASSERT_TRUE(service.addUser("alice", "hunter2-long-enough", Role::kTrader).ok());
+  enrolAndConfirm(service, "alice");
+  ASSERT_TRUE(service.totpEnabled("alice"));
+
+  // Beginning a fresh enrolment would replace the working secret and, because
+  // login enforces on the enabled flag, switch 2FA off -- with no password
+  // check. That would let one live session strip the second factor, which is
+  // exactly what disableTotp()'s password check exists to prevent.
+  const Result<TotpEnrolment> again = service.beginTotpEnrolment("alice", "Bourse");
+  EXPECT_FALSE(again.ok());
+
+  // The point of refusing is that the account is left exactly as it was.
+  EXPECT_TRUE(service.totpEnabled("alice"));
+  const Result<LoginResult> without_code = service.login("alice", "hunter2-long-enough", "10.0.0.1");
+  EXPECT_FALSE(without_code.ok());
+}
+
+TEST(AuthServiceTotpTest, DisablingNeedsThePasswordAndThenAllowsReEnrolment) {
+  AuthService service(testConfig());
+  ASSERT_TRUE(service.addUser("alice", "hunter2-long-enough", Role::kTrader).ok());
+  const std::string first = enrolAndConfirm(service, "alice");
+
+  EXPECT_FALSE(service.disableTotp("alice", "not-the-password").ok());
+  EXPECT_TRUE(service.totpEnabled("alice"));
+
+  ASSERT_TRUE(service.disableTotp("alice", "hunter2-long-enough").ok());
+  EXPECT_FALSE(service.totpEnabled("alice"));
+  EXPECT_TRUE(service.login("alice", "hunter2-long-enough", "10.0.0.1").ok());
+
+  // A new device gets a new secret rather than the retired one.
+  const std::string second = enrolAndConfirm(service, "alice");
+  EXPECT_NE(first, second);
+}
+
+TEST(AuthServiceTotpTest, MissingCodeIsDistinctFromAWrongOne) {
+  AuthService service(testConfig());
+  ASSERT_TRUE(service.addUser("alice", "hunter2-long-enough", Role::kTrader).ok());
+  enrolAndConfirm(service, "alice");
+
+  // The dashboard has to tell "now ask for a code" apart from "those
+  // credentials are wrong", or it cannot show the second-factor prompt.
+  const Result<LoginResult> missing = service.login("alice", "hunter2-long-enough", "10.0.0.1", "");
+  ASSERT_FALSE(missing.ok());
+  EXPECT_NE(missing.status().message().find("two-factor"), std::string::npos) << missing.status().toString();
+
+  const Result<LoginResult> wrong = service.login("alice", "hunter2-long-enough", "10.0.0.1", "000000");
+  EXPECT_FALSE(wrong.ok());
+}
+
+TEST(AuthServiceTotpTest, DoesNotLeakTheSecretThroughUserListings) {
+  AuthService service(testConfig());
+  ASSERT_TRUE(service.addUser("alice", "hunter2-long-enough", Role::kTrader).ok());
+  const std::string secret = enrolAndConfirm(service, "alice");
+
+  bool seen = false;
+  for (const UserRecord& record : service.listUsers()) {
+    // listUsers() promises to leave the hash out; the shared secret is kept in
+    // a side table for the same reason, so there is no field here to leak it
+    // through. What a listing may say is *that* 2FA is on, never the seed.
+    EXPECT_TRUE(record.password_hash.empty()) << record.username;
+    if (record.username == "alice") {
+      EXPECT_TRUE(record.totp_enabled);
+      seen = true;
+    }
+  }
+  EXPECT_TRUE(seen);
+
+  // Kept out of the listing but not lost: enrolment is confirmed, so the
+  // service is still holding the secret and enforcing on it.
+  EXPECT_TRUE(service.totpEnabled("alice"));
+  EXPECT_FALSE(secret.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Session management
+// ---------------------------------------------------------------------------
+
+TEST(AuthServiceSessionTest, RevokingOthersKeepsTheCallersSession) {
+  AuthService service(testConfig());
+  ASSERT_TRUE(service.addUser("alice", "hunter2-long-enough", Role::kTrader).ok());
+  ASSERT_TRUE(service.addUser("bob", "bobs-long-password", Role::kTrader).ok());
+
+  const std::string keep = service.login("alice", "hunter2-long-enough", "10.0.0.1").value().token;
+  const std::string drop = service.login("alice", "hunter2-long-enough", "10.0.0.2").value().token;
+  const std::string other = service.login("bob", "bobs-long-password", "10.0.0.3").value().token;
+
+  EXPECT_EQ(service.revokeOtherSessions("alice", keep), 1U);
+  EXPECT_TRUE(service.authenticate(keep).ok());
+  EXPECT_FALSE(service.authenticate(drop).ok());
+  // Signing out everywhere means everywhere *you* are, not everyone.
+  EXPECT_TRUE(service.authenticate(other).ok());
+}
+
+TEST(AuthServiceSessionTest, ListingsCarryAnIdThatIsNotTheToken) {
+  AuthService service(testConfig());
+  ASSERT_TRUE(service.addUser("alice", "hunter2-long-enough", Role::kTrader).ok());
+  const std::string token = service.login("alice", "hunter2-long-enough", "10.0.0.1").value().token;
+
+  const std::vector<SessionInfo> sessions = service.listSessions("alice", token);
+  ASSERT_EQ(sessions.size(), 1U);
+  EXPECT_EQ(sessions.front().username, "alice");
+  EXPECT_TRUE(sessions.front().current);
+  EXPECT_FALSE(sessions.front().id.empty());
+  // A listing that echoed the bearer token would hand every viewer of the
+  // security panel a working credential for each of its rows.
+  EXPECT_NE(sessions.front().id, token);
+  EXPECT_EQ(token.find(sessions.front().id), std::string::npos);
+}
+
+TEST(AuthServiceSessionTest, RevokingByIdEndsThatSessionOnly) {
+  AuthService service(testConfig());
+  ASSERT_TRUE(service.addUser("alice", "hunter2-long-enough", Role::kTrader).ok());
+  const std::string keep = service.login("alice", "hunter2-long-enough", "10.0.0.1").value().token;
+  const std::string drop = service.login("alice", "hunter2-long-enough", "10.0.0.2").value().token;
+
+  std::string drop_id;
+  for (const SessionInfo& session : service.listSessions("alice", keep)) {
+    if (!session.current) {
+      drop_id = session.id;
+    }
+  }
+  ASSERT_FALSE(drop_id.empty());
+
+  EXPECT_TRUE(service.revokeSessionById("alice", drop_id));
+  EXPECT_FALSE(service.authenticate(drop).ok());
+  EXPECT_TRUE(service.authenticate(keep).ok());
+
+  // A second revoke of the same id is a miss, not a silent success.
+  EXPECT_FALSE(service.revokeSessionById("alice", drop_id));
+}
+
+TEST(AuthServiceSessionTest, OneUserCannotRevokeAnothersSession) {
+  AuthService service(testConfig());
+  ASSERT_TRUE(service.addUser("alice", "hunter2-long-enough", Role::kTrader).ok());
+  ASSERT_TRUE(service.addUser("bob", "bobs-long-password", Role::kTrader).ok());
+
+  const std::string alice = service.login("alice", "hunter2-long-enough", "10.0.0.1").value().token;
+  const std::string bob = service.login("bob", "bobs-long-password", "10.0.0.2").value().token;
+
+  std::string bob_id;
+  for (const SessionInfo& session : service.listSessions("bob", bob)) {
+    bob_id = session.id;
+  }
+  ASSERT_FALSE(bob_id.empty());
+
+  // Session ids travel in a URL, so scoping the revoke to the caller is the
+  // difference between a sign-out button and a way to log anyone out.
+  EXPECT_FALSE(service.revokeSessionById("alice", bob_id));
+  EXPECT_TRUE(service.authenticate(bob).ok());
+  EXPECT_TRUE(service.authenticate(alice).ok());
 }
 
 }  // namespace

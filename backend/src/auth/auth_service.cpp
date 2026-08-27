@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "bourse/auth/crypto.hpp"
+#include "bourse/auth/totp.hpp"
 #include "bourse/core/clock.hpp"
 #include "bourse/core/logger.hpp"
 
@@ -167,6 +168,7 @@ Status AuthService::removeUser(std::string_view username) {
   }
   const std::string removed = it->second.username;
   users_.erase(it);
+  totp_.erase(removed);
   for (auto session = sessions_.begin(); session != sessions_.end();) {
     session = (session->second.username == removed) ? sessions_.erase(session) : std::next(session);
   }
@@ -185,6 +187,10 @@ std::vector<UserRecord> AuthService::listUsers() const {
     copy.username = record.username;
     copy.role = record.role;
     copy.created_at_ms = record.created_at_ms;
+    // Whether a second factor is on is exactly the sort of thing an admin
+    // audits; the shared secret lives in a side table, so saying so here
+    // cannot leak it.
+    copy.totp_enabled = record.totp_enabled;
     out.push_back(std::move(copy));
   }
   std::sort(out.begin(), out.end(),
@@ -323,10 +329,31 @@ Result<Principal> AuthService::verifyCredentials(std::string_view username, std:
 }
 
 Result<LoginResult> AuthService::login(std::string_view username, std::string_view password,
-                                       std::string_view client_id) {
+                                       std::string_view client_id, std::string_view totp_code) {
   Result<Principal> principal = verifyCredentials(username, password, client_id);
   if (!principal.ok()) {
     return principal.status();
+  }
+
+  // The second factor is checked only after the password, so a wrong password
+  // never reveals whether the account has 2FA enabled.
+  {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    const auto it = totp_.find(principal.value().username);
+    if (it != totp_.end() && it->second.enabled) {
+      if (totp_code.empty()) {
+        // Deliberately distinct from a credential failure: the client needs to
+        // know to ask for a code, not to tell the user their password is wrong.
+        return Status(ErrorCode::kInvalidArgument, "two-factor code required");
+      }
+      const TotpVerification check =
+          verifyTotp(it->second.secret, totp_code, now() / 1000, it->second.last_step);
+      if (!check.accepted) {
+        return Status(ErrorCode::kInvalidArgument, "invalid two-factor code");
+      }
+      // Remember the step so the same code cannot be presented twice.
+      it->second.last_step = check.step;
+    }
   }
 
   Result<std::string> token = randomToken(32);
@@ -334,12 +361,19 @@ Result<LoginResult> AuthService::login(std::string_view username, std::string_vi
     return token.status();
   }
 
+  Result<std::string> session_id = randomToken(8);
+  if (!session_id.ok()) {
+    return session_id.status();
+  }
+
   const std::int64_t now_ms = now();
   Session session;
+  session.id = std::move(session_id).value();
   session.username = principal.value().username;
   session.role = principal.value().role;
   session.created_at_ms = now_ms;
   session.expires_at_ms = now_ms + config_.session_ttl_ms;
+  session.client_id = std::string(client_id);
 
   {
     const std::lock_guard<std::mutex> lock(mutex_);
@@ -410,6 +444,164 @@ Result<SessionInfo> AuthService::describeSession(std::string_view token) {
   info.created_at_ms = session->created_at_ms;
   info.expires_at_ms = session->expires_at_ms;
   return info;
+}
+
+std::vector<SessionInfo> AuthService::listSessions(std::string_view username,
+                                                   std::string_view current_token) {
+  const std::int64_t now_ms = now();
+  const std::string current_key = current_token.empty() ? std::string() : tokenKey(current_token);
+
+  const std::lock_guard<std::mutex> lock(mutex_);
+  std::vector<SessionInfo> out;
+  for (const auto& [key, session] : sessions_) {
+    if (session.username != username || session.expires_at_ms <= now_ms) {
+      continue;
+    }
+    SessionInfo info;
+    info.id = session.id;
+    info.username = session.username;
+    info.role = session.role;
+    info.created_at_ms = session.created_at_ms;
+    info.expires_at_ms = session.expires_at_ms;
+    info.client_id = session.client_id;
+    info.current = !current_key.empty() && key == current_key;
+    out.push_back(std::move(info));
+  }
+  // Newest first: the session someone wants to revoke is almost always one
+  // they do not recognise, and those are the recent ones.
+  std::sort(out.begin(), out.end(),
+            [](const SessionInfo& a, const SessionInfo& b) { return a.created_at_ms > b.created_at_ms; });
+  return out;
+}
+
+bool AuthService::revokeSessionById(std::string_view username, std::string_view session_id) {
+  const std::lock_guard<std::mutex> lock(mutex_);
+  for (auto it = sessions_.begin(); it != sessions_.end(); ++it) {
+    // The username is part of the match, not an assumption. Without it any
+    // signed-in user could revoke anyone else's session by guessing an id.
+    if (it->second.id == session_id && it->second.username == username) {
+      sessions_.erase(it);
+      return true;
+    }
+  }
+  return false;
+}
+
+std::size_t AuthService::revokeOtherSessions(std::string_view username, std::string_view keep_token) {
+  const std::string keep = keep_token.empty() ? std::string() : tokenKey(keep_token);
+
+  const std::lock_guard<std::mutex> lock(mutex_);
+  std::size_t removed = 0;
+  for (auto it = sessions_.begin(); it != sessions_.end();) {
+    if (it->second.username == username && (keep.empty() || it->first != keep)) {
+      it = sessions_.erase(it);
+      ++removed;
+    } else {
+      ++it;
+    }
+  }
+  return removed;
+}
+
+// ---------------------------------------------------------------------------
+// Two-factor
+// ---------------------------------------------------------------------------
+
+Result<TotpEnrolment> AuthService::beginTotpEnrolment(std::string_view username, std::string_view issuer) {
+  Result<std::string> base32 = generateTotpSecret();
+  if (!base32.ok()) {
+    return base32.status();
+  }
+  Result<std::string> raw = base32Decode(base32.value());
+  if (!raw.ok()) {
+    return raw.status();
+  }
+
+  const std::lock_guard<std::mutex> lock(mutex_);
+  const auto user = users_.find(std::string(username));
+  if (user == users_.end()) {
+    return Status::notFound("no such user: " + std::string(username));
+  }
+
+  // Re-enrolling on an account that already has 2FA would replace a working
+  // secret and, because login enforces on `enabled`, switch 2FA off -- without
+  // the password check disableTotp() deliberately requires. That would leave
+  // one live session able to strip the second factor, so turning it off stays
+  // a single password-guarded path.
+  const auto existing = totp_.find(std::string(username));
+  if (existing != totp_.end() && existing->second.enabled) {
+    return Status(ErrorCode::kInvalidArgument,
+                  "two-factor is already enabled; disable it first to enrol a new device");
+  }
+
+  // Stored but not enabled. Enabling on a secret nobody has proved they can
+  // generate codes from is how an account gets locked out by a typo.
+  TotpState& state = totp_[std::string(username)];
+  state.secret = std::move(raw).value();
+  state.enabled = false;
+  state.last_step = -1;
+
+  TotpEnrolment out;
+  out.base32_secret = base32.value();
+  out.provisioning_uri = totpProvisioningUri(issuer, username, base32.value());
+  return out;
+}
+
+Status AuthService::confirmTotpEnrolment(std::string_view username, std::string_view code) {
+  const std::lock_guard<std::mutex> lock(mutex_);
+  const auto user = users_.find(std::string(username));
+  if (user == users_.end()) {
+    return Status::notFound("no such user: " + std::string(username));
+  }
+  const auto it = totp_.find(std::string(username));
+  if (it == totp_.end() || it->second.secret.empty()) {
+    return Status::invalidArgument("start enrolment before confirming it");
+  }
+
+  const TotpVerification check = verifyTotp(it->second.secret, code, now() / 1000, it->second.last_step);
+  if (!check.accepted) {
+    return Status::invalidArgument("that code does not match; check your device's clock");
+  }
+
+  it->second.enabled = true;
+  it->second.last_step = check.step;
+  user->second.totp_enabled = true;
+  BOURSE_LOG_INFO("two-factor enabled for '", username, "'");
+  return Status::success();
+}
+
+Status AuthService::disableTotp(std::string_view username, std::string_view password) {
+  std::string stored;
+  {
+    const std::lock_guard<std::mutex> lock(mutex_);
+    const auto user = users_.find(std::string(username));
+    if (user == users_.end()) {
+      return Status::notFound("no such user: " + std::string(username));
+    }
+    stored = user->second.password_hash;
+  }
+
+  // Re-checking the password outside the lock, because PBKDF2 is ~100ms and
+  // holding the mutex across it would stall every other auth operation.
+  const Result<bool> verified = verifyPassword(password, stored);
+  if (!verified.ok() || !verified.value()) {
+    return Status(ErrorCode::kInvalidArgument, "password does not match");
+  }
+
+  const std::lock_guard<std::mutex> lock(mutex_);
+  totp_.erase(std::string(username));
+  const auto user = users_.find(std::string(username));
+  if (user != users_.end()) {
+    user->second.totp_enabled = false;
+  }
+  BOURSE_LOG_WARN("two-factor disabled for '", username, "'");
+  return Status::success();
+}
+
+bool AuthService::totpEnabled(std::string_view username) const {
+  const std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = totp_.find(std::string(username));
+  return it != totp_.end() && it->second.enabled;
 }
 
 bool AuthService::logout(std::string_view token) {

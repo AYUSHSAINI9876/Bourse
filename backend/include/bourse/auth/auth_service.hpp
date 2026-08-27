@@ -48,6 +48,13 @@ struct UserRecord {
   std::int64_t created_at_ms = 0;
   /// Never populated by `listUsers`. Present so the store has one shape.
   std::string password_hash;
+
+  /// True once enrolment has been confirmed with a working code.
+  ///
+  /// Separate from "a secret exists" on purpose: a secret is created the moment
+  /// enrolment begins, and enabling on that alone would lock the account the
+  /// instant someone opened the enrolment screen and closed it again.
+  bool totp_enabled = false;
 };
 
 struct LoginResult {
@@ -61,10 +68,27 @@ struct LoginResult {
 };
 
 struct SessionInfo {
+  /// Stable public handle for this session.
+  ///
+  /// Random and unrelated to the token, so listing sessions to their owner
+  /// reveals nothing that could be replayed -- the token itself never leaves
+  /// the client after login.
+  std::string id;
   std::string username;
   Role role = Role::kAnonymous;
   std::int64_t created_at_ms = 0;
   std::int64_t expires_at_ms = 0;
+  /// Whatever identified the caller at login: an address, or "unknown".
+  std::string client_id;
+  /// True for the session making the request, so a UI can label it "this
+  /// device" and think twice before revoking it.
+  bool current = false;
+};
+
+/// What `beginTotpEnrolment` hands back. The secret is shown exactly once.
+struct TotpEnrolment {
+  std::string base32_secret;
+  std::string provisioning_uri;
 };
 
 /// Thread-safe. Every public method takes the lock; the server touches this
@@ -101,7 +125,12 @@ class AuthService {
   /// `client_id` is whatever identifies the caller for rate limiting -- a peer
   /// address for RESP, `X-Forwarded-For` or the socket address for HTTP. It is
   /// only used for throttling.
-  Result<LoginResult> login(std::string_view username, std::string_view password, std::string_view client_id);
+  /// `totp_code` may be empty. When the account has two-factor enabled and no
+  /// code is supplied this fails with a distinct message -- "two-factor code
+  /// required" -- rather than looking like a wrong password, so the UI can ask
+  /// for the code instead of telling the user their password is wrong.
+  Result<LoginResult> login(std::string_view username, std::string_view password, std::string_view client_id,
+                            std::string_view totp_code = {});
 
   /// Credential check with no token issued, for RESP `AUTH`, where the
   /// connection itself carries the authenticated state.
@@ -113,6 +142,40 @@ class AuthService {
   Result<Principal> authenticate(std::string_view token);
 
   [[nodiscard]] Result<SessionInfo> describeSession(std::string_view token);
+
+  /// Every live session for one account, newest first.
+  ///
+  /// `current_token` marks the caller's own session rather than filtering it
+  /// out: "sign out everywhere except here" is the operation people actually
+  /// want, and it needs the current one identified, not hidden.
+  [[nodiscard]] std::vector<SessionInfo> listSessions(std::string_view username,
+                                                      std::string_view current_token = {});
+
+  /// Revokes one session by its public id. Returns false if it is not this
+  /// user's -- checked rather than assumed, or any signed-in user could revoke
+  /// anyone else's sessions by guessing ids.
+  bool revokeSessionById(std::string_view username, std::string_view session_id);
+
+  /// Revokes every session for the account except the one presenting
+  /// `keep_token`. Pass an empty token to revoke all of them.
+  std::size_t revokeOtherSessions(std::string_view username, std::string_view keep_token);
+
+  // -- two-factor --------------------------------------------------------
+
+  /// Starts enrolment: generates a secret and returns it with the
+  /// `otpauth://` URI. Nothing is enforced until `confirmTotpEnrolment`.
+  Result<TotpEnrolment> beginTotpEnrolment(std::string_view username, std::string_view issuer);
+
+  /// Finishes enrolment once the user proves their app is generating matching
+  /// codes. Requiring that proof is what stops an account being locked out by
+  /// a mistyped secret or a phone with a wrong clock.
+  Status confirmTotpEnrolment(std::string_view username, std::string_view code);
+
+  /// Turning 2FA off requires the current password: otherwise anyone who finds
+  /// an unlocked session can quietly remove the second factor.
+  Status disableTotp(std::string_view username, std::string_view password);
+
+  [[nodiscard]] bool totpEnabled(std::string_view username) const;
 
   bool logout(std::string_view token);
   std::size_t revokeSessionsFor(std::string_view username);
@@ -129,10 +192,12 @@ class AuthService {
 
  private:
   struct Session {
+    std::string id;
     std::string username;
     Role role = Role::kAnonymous;
     std::int64_t created_at_ms = 0;
     std::int64_t expires_at_ms = 0;
+    std::string client_id;
   };
 
   struct FailureRecord {
@@ -161,6 +226,20 @@ class AuthService {
   mutable std::mutex mutex_;
   AuthConfig config_;
   std::unordered_map<std::string, UserRecord> users_;
+
+  /// TOTP state, keyed by username and held apart from UserRecord so that
+  /// listUsers() cannot leak a secret even by accident: the type it returns
+  /// simply has nowhere to put one.
+  struct TotpState {
+    std::string secret;  ///< raw bytes, not base32
+    bool enabled = false;
+    /// Highest time step already authenticated with. A code at or below this
+    /// is refused, which is what stops an observed code being replayed inside
+    /// its own window.
+    std::int64_t last_step = -1;
+  };
+
+  std::unordered_map<std::string, TotpState> totp_;
   /// Keyed by hex(SHA-256(token)), never by the token itself.
   std::unordered_map<std::string, Session> sessions_;
   std::unordered_map<std::string, FailureRecord> failures_;
