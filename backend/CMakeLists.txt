@@ -59,6 +59,7 @@ add_library(bourse_core STATIC
   # L2 -- identity. Sits beside the keyspace rather than above it: both net
   # and exec consult it, and it depends on neither.
   src/auth/crypto.cpp
+  src/auth/totp.cpp
   src/auth/auth_service.cpp
 
   # L3 -- command execution
