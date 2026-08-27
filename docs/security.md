@@ -139,6 +139,103 @@ should link libsodium and use Argon2id. That is a one-file change behind
 
 ---
 
+## Two-factor authentication
+
+TOTP, RFC 6238 over RFC 4226, implemented here rather than delegated. Off by
+default; a user turns it on for their own account.
+
+- **160-bit secret** from `/dev/urandom`, Base32-encoded for the app.
+- **HMAC-SHA1**, six digits, 30-second period, one step of drift tolerated.
+- **Replay refused**: the accepted time step is recorded and anything at or
+  below it is rejected.
+- **Enrolment requires proof**: the secret is stored the moment enrolment
+  begins, but nothing is enforced until a working code confirms it.
+- **Disabling requires the password.**
+- **Re-enrolling while enabled is refused**, so there is exactly one way
+  off, and it is the password-guarded one.
+- **Constant-time comparison** of the presented code.
+
+### Why SHA-1, in 2026
+
+RFC 6238 permits SHA-256. Every authenticator app in common use -- Google
+Authenticator, Authy, 1Password -- defaults to SHA-1, and most ignore the
+`algorithm` parameter in an `otpauth://` URI entirely. Choosing the stronger
+hash would produce codes that no phone can generate, which is a worse outcome
+than using a weak hash inside an HMAC.
+
+That distinction is the whole argument: SHA-1 is broken for **collision
+resistance** (SHAttered, 2017), and HMAC does not rely on collision resistance.
+There is no known attack on HMAC-SHA1. It is used here for TOTP and nowhere
+else -- passwords go through PBKDF2-HMAC-**SHA256**, and session tokens are
+hashed with SHA-256.
+
+### Why replay prevention matters more than it looks
+
+Without it, a code stays valid for its entire 30-second window. Anyone who
+sees one -- over a shoulder, in a screenshot, in a phished form -- can use it
+for the rest of that window. A second factor that can be observed and reused
+is not a second factor.
+
+The guard is one integer: the highest step already authenticated. Two tests
+pin the behaviour from both sides -- a replayed code is refused, **and** the
+legitimate next code is still accepted. The second matters as much as the
+first: a replay guard that also locks out the real next code locks the user
+out of their own account.
+
+### Why re-enrolment is refused rather than allowed
+
+Enrolment stores a secret and leaves it unenforced until a code confirms it.
+Run that same path on an account that already has 2FA on and two things happen:
+the working secret is replaced, and -- because login enforces on the *enabled*
+flag -- the second factor switches off. No password is asked for anywhere in
+that sequence.
+
+That would make `POST /api/auth/2fa/begin` a way to strip 2FA from a stolen
+session, which is precisely what the password check on `disableTotp` exists to
+prevent. Leaving both paths open would mean the guarded one is decorative.
+
+So enrolment refuses while 2FA is enabled: turning it off goes through the
+password, and moving to a new phone is disable-then-enrol.
+`RefusesToReEnrolWhileEnabled` asserts both halves -- that the call fails, and
+that the account is left enforcing exactly as it was.
+
+### Why a missing code is not a login failure
+
+`login` reports "two-factor code required" as a distinct outcome from bad
+credentials, and the API answers `401` with `"code":"TOTP_REQUIRED"`. Two
+reasons:
+
+1. The UI can reveal the code field instead of telling the user their password
+   was wrong when it was right.
+2. The second factor is checked **after** the password, so a wrong password
+   never reveals whether an account has 2FA enabled.
+
+### How it is verified
+
+A one-time-password implementation is either bit-for-bit compatible with what
+a phone generates or it is useless, and the RFCs print exactly the table needed
+to decide which:
+
+| Component | Checked against |
+|---|---|
+| SHA-1 | FIPS 180-4 vectors, plus every padding boundary |
+| HMAC-SHA1 | RFC 2202, including keys longer than the block |
+| Base32 | RFC 4648 vectors, round-trip, and hostile input |
+| HOTP | RFC 4226 Appendix D -- all ten counters |
+| TOTP | RFC 6238 Appendix B -- all six timestamps |
+
+```bash
+./backend/build/bin/bourse_tests --gtest_filter='Sha1*:Hmac*:Base32*:Hotp*:Totp*'
+```
+
+### Known gap
+
+No QR code. Rendering one needs a Reed-Solomon encoder and mask evaluation --
+several hundred lines for a convenience -- so enrolment shows the Base32 secret
+and the `otpauth://` URI instead. Every authenticator app accepts manual entry.
+
+---
+
 ## Sessions
 
 - **256 bits** of entropy per token, from `/dev/urandom`. A short read is a hard
@@ -156,6 +253,12 @@ should link libsodium and use Argon2id. That is a one-file change behind
   rights for the remaining 12 hours.
 - Hard ceiling of 10,000 live sessions; expired entries are reclaimed before
   the limit is reported as reached.
+- Each session carries a **random public id unrelated to its token**, so a user
+  can list and revoke their own sessions without anything replayable crossing
+  the wire. Revocation matches on username *and* id -- without the username any
+  signed-in user could revoke anyone else's sessions by guessing.
+- "Sign out other devices" keeps the calling session alive. Conflating it with
+  a full logout means the user cannot see that it worked.
 
 ### Why sessions are not stored in the keyspace
 
