@@ -303,6 +303,56 @@ else
     "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$auth_base/api/command" \
        -H "Authorization: Bearer $demo_token" -d 'FLUSHALL')"
 
+  # ---- two-factor and sessions ----------------------------------------
+  #
+  # A valid code cannot be produced from a shell without an HMAC-SHA1
+  # implementation, so this covers what is observable over HTTP: that enrolment
+  # issues a secret, that an unconfirmed secret enforces nothing, that a wrong
+  # code is refused, and that sessions can be listed and revoked. The algorithm
+  # itself is pinned by the RFC vectors in test_totp.cpp.
+
+  begin_2fa="$(curl -fsS -X POST "$auth_base/api/auth/2fa/begin" -H "$auth_header")"
+  check "2FA enrolment returns a secret"  '"secret"'        "$begin_2fa"
+  check "2FA enrolment returns a URI"     "otpauth://totp/" "$begin_2fa"
+  check "URI names the issuer"            "issuer=Bourse"   "$begin_2fa"
+  check "URI declares SHA1"               "algorithm=SHA1"  "$begin_2fa"
+
+  # Enrolment alone must not begin enforcing. If an unconfirmed secret locked
+  # the account, merely opening the setup screen would lock you out.
+  check "unconfirmed 2FA does not lock the account" '"token"' \
+    "$(curl -fsS -X POST "$auth_base/api/auth/login" -H 'Content-Type: application/json' \
+       -d '{"username":"root","password":"root-password-1"}')"
+
+  check "a wrong confirmation code is refused" "400" \
+    "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$auth_base/api/auth/2fa/confirm" \
+       -H "$auth_header" -H 'Content-Type: application/json' -d '{"code":"000000"}')"
+
+  # The admin listing has to report the second-factor state, or an audit of
+  # who has 2FA on reads as "nobody" no matter what is actually enforced.
+  check "user listing reports the 2FA state" '"totp_enabled"'     "$(curl -fsS "$auth_base/api/auth/users" -H "$auth_header")"
+
+  sessions="$(curl -fsS "$auth_base/api/auth/sessions" -H "$auth_header")"
+  check "sessions endpoint marks this one" '"current":true' "$sessions"
+  check "sessions carry a public id"       '"id"'           "$sessions"
+
+  # The raw token must never appear in a listing -- carrying a separate random
+  # id is the entire reason sessions have one.
+  if [ -n "${admin_token:-}" ]; then
+    case "$sessions" in
+      *"$admin_token"*) check "session listing leaks no token" "clean" "LEAKED THE TOKEN" ;;
+      *) check "session listing leaks no token" "clean" "clean" ;;
+    esac
+  fi
+
+  check "revoke-others keeps this session alive" '"ok":true' \
+    "$(curl -fsS -X POST "$auth_base/api/auth/sessions/revoke-others" -H "$auth_header")"
+  check "this session still works afterwards"    "200" \
+    "$(curl -s -o /dev/null -w '%{http_code}' "$auth_base/api/stats" -H "$auth_header")"
+
+  check "revoking an unknown session is a 404"   "404" \
+    "$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+       "$auth_base/api/auth/sessions/deadbeefdeadbeef" -H "$auth_header")"
+
   check "a forged token is refused"       "401" \
     "$(curl -s -o /dev/null -w '%{http_code}' "$auth_base/api/stats" \
        -H 'Authorization: Bearer 0000000000000000000000000000000000000000000000000000000000000000')"
