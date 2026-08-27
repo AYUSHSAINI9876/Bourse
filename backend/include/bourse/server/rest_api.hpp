@@ -22,6 +22,13 @@ void buildRestApi(net::Router& router, exec::ServerContext& context, const exec:
 /// its own permission check small enough to audit at a glance.
 void buildAuthApi(net::Router& router, exec::ServerContext& context);
 
+/// Installs `/api/auth/2fa/*` and `/api/auth/sessions*`.
+///
+/// Every route acts on the caller's own account, taken from the authenticated
+/// principal rather than a request field: accepting a username would let any
+/// signed-in user enrol or disable two-factor on somebody else's account.
+void buildTwoFactorApi(net::Router& router, exec::ServerContext& context);
+
 /// Resolves a bearer token into `HttpRequest::principal`, and refuses
 /// unauthenticated requests to non-public paths when auth is enabled.
 ///

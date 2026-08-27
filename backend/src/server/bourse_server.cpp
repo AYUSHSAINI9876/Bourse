@@ -559,6 +559,7 @@ Status BourseServer::startHttp() {
   router_.use(net::makeCorsMiddleware());
   router_.use(makeRestAuthMiddleware(context_));
   buildAuthApi(router_, context_);
+  buildTwoFactorApi(router_, context_);
   buildRestApi(router_, context_, *registry_);
 
   net::ServerOptions options;

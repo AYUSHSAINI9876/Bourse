@@ -184,10 +184,20 @@ void buildAuthApi(net::Router& router, exec::ServerContext& context) {
           return;
         }
 
-        Result<auth::LoginResult> login = service->login(username, password, clientIdOf(request));
+        const std::string totp_code = net::jsonFieldOf(request.body, "totp");
+        Result<auth::LoginResult> login = service->login(username, password, clientIdOf(request), totp_code);
         if (!login.ok()) {
           // 429 for the throttle, 401 for bad credentials. A client that cannot
           // tell them apart retries into a longer lockout.
+          // "two-factor code required" is a prompt, not a rejection: answering
+          // it with 401 and a generic message would send the user back to
+          // re-check a password that was in fact correct.
+          const std::string message = login.status().message();
+          if (message == "two-factor code required") {
+            response = net::HttpResponse::json(
+                R"({"error":"two-factor code required","code":"TOTP_REQUIRED"})", 401);
+            return;
+          }
           const bool throttled = login.status().code() == ErrorCode::kUnsupported;
           response = net::HttpResponse::json("{\"error\":" + jsonString(login.status().message()) + "}",
                                              throttled ? 429 : 401);
@@ -231,6 +241,13 @@ void buildAuthApi(net::Router& router, exec::ServerContext& context) {
     payload += enabled ? "true" : "false";
     payload += ",\"username\":" + jsonString(request.principal.username);
     payload += ",\"role\":" + roleJson(request.principal.role);
+    // Lets the dashboard show the two-factor panel in the right state without
+    // a second round trip on every page load.
+    payload += ",\"totp_enabled\":";
+    payload += (context.auth != nullptr && request.principal.authenticated() &&
+                context.auth->totpEnabled(request.principal.username))
+                   ? "true"
+                   : "false";
     payload += "}";
     response = net::HttpResponse::json(std::move(payload));
     response.setHeader("Cache-Control", "no-store");
@@ -264,7 +281,12 @@ void buildAuthApi(net::Router& router, exec::ServerContext& context) {
       first = false;
       payload += "{\"username\":" + jsonString(user.username);
       payload += ",\"role\":" + roleJson(user.role);
-      payload += ",\"created_at_ms\":" + std::to_string(user.created_at_ms) + "}";
+      payload += ",\"created_at_ms\":" + std::to_string(user.created_at_ms);
+      // An admin auditing which accounts have a second factor needs this in
+      // the listing; without it every row reads as 2FA-off.
+      payload += ",\"totp_enabled\":";
+      payload += user.totp_enabled ? "true" : "false";
+      payload += "}";
     }
     payload += "]}";
     response = net::HttpResponse::json(std::move(payload));
@@ -311,6 +333,127 @@ void buildAuthApi(net::Router& router, exec::ServerContext& context) {
       return;
     }
     response = net::HttpResponse::json(R"({"ok":true})");
+  });
+}
+
+void buildTwoFactorApi(net::Router& router, exec::ServerContext& context) {
+  const auto service = [&context]() { return context.auth; };
+
+  // Every route here acts on the caller's *own* account, taken from the
+  // authenticated principal rather than from the request body. Accepting a
+  // username here would let any signed-in user enrol or disable two-factor on
+  // somebody else's account.
+
+  router.post("/api/auth/2fa/begin", [service](const net::HttpRequest& request, net::HttpResponse& response) {
+    auth::AuthService* auth_service = service();
+    if (auth_service == nullptr || !request.principal.authenticated()) {
+      response = net::HttpResponse::json(R"({"error":"authentication required"})", 401);
+      return;
+    }
+    Result<auth::TotpEnrolment> enrolment =
+        auth_service->beginTotpEnrolment(request.principal.username, "Bourse");
+    if (!enrolment.ok()) {
+      response = net::HttpResponse::json("{\"error\":" + jsonString(enrolment.status().message()) + "}", 400);
+      return;
+    }
+    std::string payload = "{\"secret\":" + jsonString(enrolment.value().base32_secret);
+    payload += ",\"uri\":" + jsonString(enrolment.value().provisioning_uri);
+    payload += "}";
+    response = net::HttpResponse::json(std::move(payload));
+    // The secret is shown once and must not survive in a cache anywhere.
+    response.setHeader("Cache-Control", "no-store");
+  });
+
+  router.post(
+      "/api/auth/2fa/confirm", [service](const net::HttpRequest& request, net::HttpResponse& response) {
+        auth::AuthService* auth_service = service();
+        if (auth_service == nullptr || !request.principal.authenticated()) {
+          response = net::HttpResponse::json(R"({"error":"authentication required"})", 401);
+          return;
+        }
+        const std::string code = net::jsonFieldOf(request.body, "code");
+        const Status confirmed = auth_service->confirmTotpEnrolment(request.principal.username, code);
+        if (!confirmed.ok()) {
+          response = net::HttpResponse::json("{\"error\":" + jsonString(confirmed.message()) + "}", 400);
+          return;
+        }
+        response = net::HttpResponse::json(R"({"ok":true,"totp_enabled":true})");
+      });
+
+  router.post(
+      "/api/auth/2fa/disable", [service](const net::HttpRequest& request, net::HttpResponse& response) {
+        auth::AuthService* auth_service = service();
+        if (auth_service == nullptr || !request.principal.authenticated()) {
+          response = net::HttpResponse::json(R"({"error":"authentication required"})", 401);
+          return;
+        }
+        const std::string password = net::jsonFieldOf(request.body, "password");
+        const Status disabled = auth_service->disableTotp(request.principal.username, password);
+        if (!disabled.ok()) {
+          response = net::HttpResponse::json("{\"error\":" + jsonString(disabled.message()) + "}", 403);
+          return;
+        }
+        response = net::HttpResponse::json(R"({"ok":true,"totp_enabled":false})");
+      });
+
+  // ---- sessions ---------------------------------------------------------
+
+  router.get("/api/auth/sessions", [service](const net::HttpRequest& request, net::HttpResponse& response) {
+    auth::AuthService* auth_service = service();
+    if (auth_service == nullptr || !request.principal.authenticated()) {
+      response = net::HttpResponse::json(R"({"error":"authentication required"})", 401);
+      return;
+    }
+    const std::string token = bearerTokenOf(request);
+    std::string payload = "{\"sessions\":[";
+    bool first = true;
+    for (const auth::SessionInfo& session : auth_service->listSessions(request.principal.username, token)) {
+      if (!first) {
+        payload += ',';
+      }
+      first = false;
+      payload += "{\"id\":" + jsonString(session.id);
+      payload += ",\"created_at_ms\":" + std::to_string(session.created_at_ms);
+      payload += ",\"expires_at_ms\":" + std::to_string(session.expires_at_ms);
+      payload += ",\"client\":" + jsonString(session.client_id);
+      payload += ",\"current\":";
+      payload += session.current ? "true" : "false";
+      payload += "}";
+    }
+    payload += "]}";
+    response = net::HttpResponse::json(std::move(payload));
+    response.setHeader("Cache-Control", "no-store");
+  });
+
+  router.del("/api/auth/sessions/:id", [service](const net::HttpRequest& request,
+                                                 net::HttpResponse& response) {
+    auth::AuthService* auth_service = service();
+    if (auth_service == nullptr || !request.principal.authenticated()) {
+      response = net::HttpResponse::json(R"({"error":"authentication required"})", 401);
+      return;
+    }
+    const bool revoked = auth_service->revokeSessionById(request.principal.username, request.pathParam("id"));
+    if (!revoked) {
+      // 404 rather than 403: whether an id exists but belongs to someone else
+      // is not information this caller is entitled to.
+      response = net::HttpResponse::json(R"({"error":"no such session"})", 404);
+      return;
+    }
+    response = net::HttpResponse::json(R"({"ok":true})");
+  });
+
+  router.post("/api/auth/sessions/revoke-others", [service](const net::HttpRequest& request,
+                                                            net::HttpResponse& response) {
+    auth::AuthService* auth_service = service();
+    if (auth_service == nullptr || !request.principal.authenticated()) {
+      response = net::HttpResponse::json(R"({"error":"authentication required"})", 401);
+      return;
+    }
+    // Keeps the caller signed in. "Sign out everywhere including here" is a
+    // logout, and conflating the two means the user cannot see the result.
+    const std::size_t revoked =
+        auth_service->revokeOtherSessions(request.principal.username, bearerTokenOf(request));
+    response = net::HttpResponse::json("{\"ok\":true,\"revoked\":" + std::to_string(revoked) + "}");
   });
 }
 
