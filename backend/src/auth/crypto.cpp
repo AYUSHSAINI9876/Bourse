@@ -250,6 +250,162 @@ Sha256::Digest hmacSha256(std::string_view key, std::string_view message) noexce
 }
 
 // ---------------------------------------------------------------------------
+// SHA-1 (FIPS 180-4) -- for TOTP only; see the note in crypto.hpp
+// ---------------------------------------------------------------------------
+
+namespace {
+
+constexpr std::uint32_t kSha1InitialState[5] = {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0};
+
+constexpr std::uint32_t rotl(std::uint32_t x, unsigned n) noexcept {
+  return (x << n) | (x >> (32U - n));
+}
+
+}  // namespace
+
+void Sha1::reset() noexcept {
+  std::copy(std::begin(kSha1InitialState), std::end(kSha1InitialState), state_.begin());
+  buffered_ = 0;
+  total_bits_ = 0;
+}
+
+void Sha1::compress(const std::uint8_t block[kBlockSize]) noexcept {
+  std::uint32_t w[80];
+  for (int i = 0; i < 16; ++i) {
+    w[i] = loadBe32(block + 4 * i);
+  }
+  for (int i = 16; i < 80; ++i) {
+    w[i] = rotl(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+  }
+
+  std::uint32_t a = state_[0], b = state_[1], c = state_[2], d = state_[3], e = state_[4];
+
+  for (int i = 0; i < 80; ++i) {
+    std::uint32_t f = 0;
+    std::uint32_t k = 0;
+    if (i < 20) {
+      f = (b & c) | (~b & d);
+      k = 0x5A827999;
+    } else if (i < 40) {
+      f = b ^ c ^ d;
+      k = 0x6ED9EBA1;
+    } else if (i < 60) {
+      f = (b & c) | (b & d) | (c & d);
+      k = 0x8F1BBCDC;
+    } else {
+      f = b ^ c ^ d;
+      k = 0xCA62C1D6;
+    }
+    const std::uint32_t temp = rotl(a, 5) + f + e + k + w[i];
+    e = d;
+    d = c;
+    c = rotl(b, 30);
+    b = a;
+    a = temp;
+  }
+
+  state_[0] += a;
+  state_[1] += b;
+  state_[2] += c;
+  state_[3] += d;
+  state_[4] += e;
+
+  secureZero(w, sizeof(w));
+}
+
+void Sha1::update(const void* data, std::size_t size) noexcept {
+  const auto* input = static_cast<const std::uint8_t*>(data);
+  total_bits_ += static_cast<std::uint64_t>(size) * 8;
+
+  if (buffered_ > 0) {
+    const std::size_t take = std::min(kBlockSize - buffered_, size);
+    std::memcpy(buffer_.data() + buffered_, input, take);
+    buffered_ += take;
+    input += take;
+    size -= take;
+    if (buffered_ == kBlockSize) {
+      compress(buffer_.data());
+      buffered_ = 0;
+    }
+  }
+
+  while (size >= kBlockSize) {
+    compress(input);
+    input += kBlockSize;
+    size -= kBlockSize;
+  }
+
+  if (size > 0) {
+    std::memcpy(buffer_.data(), input, size);
+    buffered_ = size;
+  }
+}
+
+Sha1::Digest Sha1::finish() noexcept {
+  // Identical padding rule to SHA-256: 0x80, zeros, then the length as a
+  // 64-bit big-endian count of bits.
+  const std::uint64_t bits = total_bits_;
+  std::uint8_t padding[kBlockSize * 2] = {0x80};
+  const std::size_t remainder = static_cast<std::size_t>((bits / 8) % kBlockSize);
+  const std::size_t pad_len = (remainder < 56) ? (56 - remainder) : (120 - remainder);
+  storeBe64(padding + pad_len, bits);
+  update(padding, pad_len + 8);
+
+  Digest digest{};
+  for (int i = 0; i < 5; ++i) {
+    storeBe32(digest.data() + 4 * i, state_[i]);
+  }
+  secureZero(buffer_.data(), buffer_.size());
+  return digest;
+}
+
+Sha1::Digest Sha1::hash(const void* data, std::size_t size) noexcept {
+  Sha1 sha;
+  sha.update(data, size);
+  return sha.finish();
+}
+
+Sha1::Digest Sha1::hash(std::string_view text) noexcept {
+  return hash(text.data(), text.size());
+}
+
+Sha1::Digest hmacSha1(std::string_view key, std::string_view message) noexcept {
+  std::uint8_t block_key[Sha1::kBlockSize] = {};
+  if (key.size() > Sha1::kBlockSize) {
+    const Sha1::Digest reduced = Sha1::hash(key);
+    std::memcpy(block_key, reduced.data(), reduced.size());
+  } else if (!key.empty()) {
+    std::memcpy(block_key, key.data(), key.size());
+  }
+
+  std::uint8_t inner_pad[Sha1::kBlockSize];
+  std::uint8_t outer_pad[Sha1::kBlockSize];
+  for (std::size_t i = 0; i < Sha1::kBlockSize; ++i) {
+    inner_pad[i] = static_cast<std::uint8_t>(block_key[i] ^ 0x36);
+    outer_pad[i] = static_cast<std::uint8_t>(block_key[i] ^ 0x5c);
+  }
+
+  Sha1 inner;
+  inner.update(inner_pad, sizeof(inner_pad));
+  inner.update(message.data(), message.size());
+  const Sha1::Digest inner_digest = inner.finish();
+
+  Sha1 outer;
+  outer.update(outer_pad, sizeof(outer_pad));
+  outer.update(inner_digest.data(), inner_digest.size());
+  const Sha1::Digest result = outer.finish();
+
+  secureZero(block_key, sizeof(block_key));
+  secureZero(inner_pad, sizeof(inner_pad));
+  secureZero(outer_pad, sizeof(outer_pad));
+  return result;
+}
+
+std::string toHex(const Sha1::Digest& digest) {
+  return toHex(digest.data(), digest.size());
+}
+
+// ---------------------------------------------------------------------------
 // PBKDF2-HMAC-SHA256 (RFC 8018 §5.2)
 // ---------------------------------------------------------------------------
 

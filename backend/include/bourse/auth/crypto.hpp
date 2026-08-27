@@ -65,6 +65,52 @@ class Sha256 {
 /// HMAC-SHA256 (RFC 2104).
 [[nodiscard]] Sha256::Digest hmacSha256(std::string_view key, std::string_view message) noexcept;
 
+/// Streaming SHA-1 (FIPS 180-4).
+///
+/// Present only because TOTP needs it. RFC 6238 permits SHA-256, but every
+/// authenticator app in common use -- Google Authenticator, Authy, 1Password --
+/// defaults to SHA-1 and most ignore the `algorithm` parameter in an
+/// `otpauth://` URI entirely. Choosing the stronger hash here would produce
+/// codes that no phone can generate, which is a worse outcome than using a
+/// weak hash inside an HMAC.
+///
+/// That distinction matters: SHA-1 is broken for *collision resistance*
+/// (SHAttered, 2017), and HMAC does not depend on collision resistance. There
+/// is no known attack on HMAC-SHA1. It must never be used to hash a password
+/// or sign a document, and `hashPassword` below does not.
+class Sha1 {
+ public:
+  static constexpr std::size_t kDigestSize = 20;
+  static constexpr std::size_t kBlockSize = 64;
+
+  using Digest = std::array<std::uint8_t, kDigestSize>;
+
+  Sha1() noexcept { reset(); }
+
+  void reset() noexcept;
+  void update(const void* data, std::size_t size) noexcept;
+
+  void update(std::string_view text) noexcept { update(text.data(), text.size()); }
+
+  [[nodiscard]] Digest finish() noexcept;
+
+  [[nodiscard]] static Digest hash(std::string_view text) noexcept;
+  [[nodiscard]] static Digest hash(const void* data, std::size_t size) noexcept;
+
+ private:
+  void compress(const std::uint8_t block[kBlockSize]) noexcept;
+
+  std::array<std::uint32_t, 5> state_{};
+  std::array<std::uint8_t, kBlockSize> buffer_{};
+  std::size_t buffered_ = 0;
+  std::uint64_t total_bits_ = 0;
+};
+
+/// HMAC-SHA1 (RFC 2104). Used by TOTP and nothing else.
+[[nodiscard]] Sha1::Digest hmacSha1(std::string_view key, std::string_view message) noexcept;
+
+[[nodiscard]] std::string toHex(const Sha1::Digest& digest);
+
 /// PBKDF2-HMAC-SHA256 (RFC 8018 §5.2).
 ///
 /// `iterations` is the work factor; `length` is the derived-key length in
