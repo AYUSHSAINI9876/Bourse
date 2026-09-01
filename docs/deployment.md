@@ -185,17 +185,28 @@ you a second, frontend-shaped link.
 
 ### 1.5 Turn on authentication
 
-Everything above is deployed wide open: anyone who finds the URL can run
-`FLUSHALL`. For anything public, turn on auth. In Render, **Environment** →
-**Add Environment Variable**:
+A deployment created from `render.yaml` already has authentication on: the
+blueprint declares the variables below, so a fork comes up with auth enforced,
+a generated admin password, and the read-only `guest` account the README
+advertises. There is nothing to click.
 
-| Key | Value |
-|---|---|
-| `BOURSE_AUTH` | `yes` |
-| `BOURSE_ADMIN_USER` | `admin` |
-| `BOURSE_ADMIN_PASSWORD` | a long random string you generate |
-| `BOURSE_DEMO_USER` | `guest` (optional) |
-| `BOURSE_DEMO_PASSWORD` | a password you are happy to publish (optional) |
+| Key | Value | Where it comes from |
+|---|---|---|
+| `BOURSE_AUTH` | `yes` | `render.yaml` |
+| `BOURSE_ADMIN_USER` | `admin` | `render.yaml` |
+| `BOURSE_ADMIN_PASSWORD` | a long random string | `generateValue: true` — Render generates it on first deploy and shows it under **Environment** |
+| `BOURSE_DEMO_USER` | `guest` | `render.yaml` |
+| `BOURSE_DEMO_PASSWORD` | `explore-bourse-2026` | `render.yaml` |
+
+The blueprint is the source of truth on purpose. The demo account was added to
+the server and to the README before it was added here, and the result was a
+front page publishing a login that a freshly deployed instance did not have.
+Configuration the documentation depends on belongs in the repository.
+
+Deploying without the blueprint — a service created by hand in the web UI —
+means setting these yourself under **Environment** → **Add Environment
+Variable**. The same applies to changing them on an existing service: edit the
+value in the dashboard, or redeploy the blueprint to resync it.
 
 The last two seed a **read-only viewer** at startup. Without them, a public
 deployment forces a choice between publishing admin credentials and letting
