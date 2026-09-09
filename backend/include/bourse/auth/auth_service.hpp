@@ -107,6 +107,19 @@ class AuthService {
   /// (alphanumeric, `_`, `-`, `.`, 1..64) so a name can never collide with
   /// protocol syntax or turn up in a log line as something else.
   Status addUser(std::string_view username, std::string_view password, Role role);
+
+  /// Self-service registration, and the role it assigned.
+  ///
+  /// The first account on an empty store becomes the administrator; every one
+  /// after it is a trader. Somebody has to be able to manage a deployment, and
+  /// the alternative -- seeding a fixed account from configuration -- means
+  /// either publishing its password or locking everyone out, which is the
+  /// state this replaced.
+  ///
+  /// The role decision happens under the same lock as the insert, so two
+  /// registrations racing on a cold server cannot both see an empty store and
+  /// both come back administrators.
+  Result<Role> registerUser(std::string_view username, std::string_view password);
   Status setPassword(std::string_view username, std::string_view password);
   Status setRole(std::string_view username, Role role);
 
@@ -186,6 +199,23 @@ class AuthService {
 
   [[nodiscard]] std::size_t sessionCount() const;
 
+  // -- durability --------------------------------------------------------
+
+  /// Points the service at a file holding the accounts, loading whatever is
+  /// already there and rewriting it after every change to a user.
+  ///
+  /// Without this the accounts live only in memory, and self-service signup
+  /// becomes a trap: a user registers, the process restarts, and their account
+  /// is gone with no way to tell them why. Sessions are deliberately *not*
+  /// stored -- a restart signing everyone out is both expected and the safe
+  /// direction to fail.
+  ///
+  /// The file is rewritten whole and renamed into place rather than appended
+  /// to, so a crash mid-write leaves the previous copy intact. Accounts number
+  /// in the tens, so the cost of rewriting is irrelevant next to the failure
+  /// mode it removes.
+  Status openStore(const std::string& path);
+
   /// Test seam: the clock. Sessions and lockouts are time-driven, and a test
   /// that has to sleep for twelve hours is a test nobody runs.
   void setClockForTesting(std::int64_t (*clock)()) noexcept { clock_ = clock; }
@@ -223,6 +253,12 @@ class AuthService {
   void recordFailureLocked(const std::string& key, std::int64_t now_ms);
   void clearFailuresLocked(const std::string& key);
 
+  /// Requires `mutex_`. Writes the account table to `store_path_`, or does
+  /// nothing when no store is configured. A failure is logged and returned
+  /// rather than thrown away: losing durability silently is how a deployment
+  /// discovers at restart that nothing was ever saved.
+  Status persistLocked() const;
+
   mutable std::mutex mutex_;
   AuthConfig config_;
   std::unordered_map<std::string, UserRecord> users_;
@@ -249,6 +285,9 @@ class AuthService {
   /// while a wrong password takes ~100 ms, and that gap enumerates the user
   /// list from the outside.
   std::string decoy_hash_;
+
+  /// Empty until `openStore`. Guarded by `mutex_` like everything else here.
+  std::string store_path_;
 
   std::int64_t (*clock_)() = nullptr;
 };

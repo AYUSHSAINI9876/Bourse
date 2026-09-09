@@ -48,6 +48,11 @@ stage "smoke: split deployment + auth"  bash scripts/smoke-deploy.sh
 stage "crypto vs. Python hashlib"       bash scripts/verify-crypto.sh
 stage "dashboard static checks"         bash scripts/check-dashboard.sh
 
+# The static checks above cannot tell a working page from a page whose script
+# failed to parse. This one opens it and clicks. It skips cleanly where
+# playwright is not installed, so it never blocks a build that has no browser.
+stage "dashboard in a real browser"     python3 scripts/check-dashboard-browser.py
+
 if [[ "${BOURSE_SANITIZERS:-0}" == "1" ]]; then
   stage "sanitizers (ASan+UBSan, TSan)" bash scripts/check-sanitizers.sh
 fi

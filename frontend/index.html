@@ -209,6 +209,19 @@
   .gate-card h2 { margin: 0 0 4px; font-size: 19px; letter-spacing: -.02em; text-transform: none;
                   color: var(--ink); letter-spacing: normal; }
   .gate-card p { margin: 0 0 18px; color: var(--muted); font-size: 12.5px; }
+
+  /* Two modes, one form. Tabs rather than a "no account? sign up" link: both
+     paths are equally likely on a server anyone can join, and a link would
+     bury the one a first-time visitor needs. */
+  .gate-tabs { display: flex; gap: 4px; margin: 14px 0 16px; padding: 3px;
+               background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+  .gate-tabs button {
+    flex: 1; padding: 7px 8px; border-radius: 6px; font-size: 12.5px; font-weight: 500;
+    background: transparent; color: var(--muted); border: 1px solid transparent;
+  }
+  .gate-tabs button.on { background: var(--panel); color: var(--ink); border-color: var(--line);
+                         box-shadow: var(--shadow); }
+  .gate-tabs button:not(.on):hover { color: var(--ink); }
   .gate-card label { display: block; font-size: 11.5px; color: var(--muted); margin: 0 0 5px; }
   .gate-card input { width: 100%; margin-bottom: 13px; }
   .gate-card button { width: 100%; padding: 9px; }
@@ -222,16 +235,32 @@
 </head>
 <body>
 
-<!-- Login gate. Shown only when the server says authentication is required and
-     no stored token resolves; a server running without auth never sees it. -->
+<!-- Sign-in gate. Shown only when the server says authentication is required
+     and no stored token resolves; a server running without auth never sees it.
+     One form serves both modes: the fields are the same, and swapping the
+     endpoint is the only real difference between signing in and signing up. -->
 <div id="gate" role="dialog" aria-modal="true" aria-labelledby="gateTitle">
   <form class="gate-card" id="loginForm">
     <h2 id="gateTitle">Bourse</h2>
-    <p>This server requires authentication.</p>
+
+    <div class="gate-tabs" role="tablist" aria-label="Sign in or create an account">
+      <button type="button" role="tab" id="tabSignin" aria-selected="true" class="on">Sign in</button>
+      <button type="button" role="tab" id="tabSignup" aria-selected="false">Create account</button>
+    </div>
+
+    <p id="gateBlurb">Sign in to use this server.</p>
+
     <label for="lu">Username</label>
     <input id="lu" autocomplete="username" autocapitalize="off" spellcheck="false" required>
     <label for="lp">Password</label>
     <input id="lp" type="password" autocomplete="current-password" required>
+
+    <!-- Signup only. Catching a typo here costs one field; not catching it
+         means an account whose password nobody knows, and no reset flow. -->
+    <div id="confirmRow" hidden>
+      <label for="lc">Confirm password</label>
+      <input id="lc" type="password" autocomplete="new-password">
+    </div>
 
     <!-- Revealed only after the server answers TOTP_REQUIRED. Showing it to
          everyone would imply every account needs a code, and asking for one
@@ -596,7 +625,13 @@ function applyIdentity(identity) {
   $("send").title = canWrite ? "" : "Your role is read-only";
 
   $("gate").classList.toggle("show", authRequired && !signedIn);
-  if (authRequired && !signedIn) { setTimeout(() => $("lu").focus(), 30); }
+  if (authRequired && !signedIn) {
+    // A deployment with no accounts has nothing to sign in to, so open on the
+    // tab that can actually get someone in and say what that first account is.
+    firstAccount = identity.has_accounts === false;
+    if (firstAccount && gateMode !== "signup") { setGateMode("signup"); }
+    setTimeout(() => $("lu").focus(), 30);
+  }
 }
 
 async function loadIdentity() {
@@ -623,13 +658,55 @@ function onSessionLost() {
   }
 }
 
+// "signin" or "signup". The gate opens on signup when the server reports no
+// accounts yet, because on a fresh deployment there is nothing to sign in to.
+let gateMode = "signin";
+let firstAccount = false;
+
+function setGateMode(mode) {
+  gateMode = mode;
+  const up = mode === "signup";
+  $("tabSignin").classList.toggle("on", !up);
+  $("tabSignup").classList.toggle("on", up);
+  $("tabSignin").setAttribute("aria-selected", String(!up));
+  $("tabSignup").setAttribute("aria-selected", String(up));
+
+  $("confirmRow").hidden = !up;
+  $("lc").required = up;
+  // A second factor belongs to an account that already exists; asking for one
+  // while creating that account makes no sense.
+  if (up) { $("totpRow").hidden = true; $("lt").value = ""; }
+
+  $("loginBtn").textContent = up ? "Create account" : "Sign in";
+  $("lp").setAttribute("autocomplete", up ? "new-password" : "current-password");
+  $("gateBlurb").textContent = up
+    ? (firstAccount
+        ? "No accounts exist yet — the first one created becomes the administrator."
+        : "Choose a username and password. New accounts can trade and write keys.")
+    : "Sign in to use this server.";
+  $("loginMsg").textContent = "";
+}
+
+$("tabSignin").onclick = () => { setGateMode("signin"); $("lu").focus(); };
+$("tabSignup").onclick = () => { setGateMode("signup"); $("lu").focus(); };
+
 $("loginForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = $("loginBtn");
+  const signup = gateMode === "signup";
+
+  // Checked here rather than server-side because the server never sees the
+  // second field: it exists only to catch a typo before the account is made.
+  if (signup && $("lp").value !== $("lc").value) {
+    $("loginMsg").innerHTML = '<span class="err">Those passwords do not match.</span>';
+    $("lc").focus();
+    return;
+  }
+
   button.disabled = true;
-  $("loginMsg").textContent = "Signing in…";
+  $("loginMsg").textContent = signup ? "Creating account…" : "Signing in…";
   try {
-    const result = await api("/api/auth/login", {
+    const result = await api(signup ? "/api/auth/register" : "/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -641,12 +718,15 @@ $("loginForm").addEventListener("submit", async (event) => {
     token = result.token;
     writeStored(kTokenKey, token);
     $("lp").value = "";
+    $("lc").value = "";
     $("lt").value = "";
     $("totpRow").hidden = true;
     $("loginMsg").innerHTML = '<span class="ok">Signed in.</span>';
     await loadIdentity();
     refresh();
-    toast("Signed in as " + result.username, "good");
+    toast(signup
+      ? "Account created — signed in as " + result.username + " (" + result.role + ")"
+      : "Signed in as " + result.username, "good");
   } catch (e) {
     // `api()` clears the token on a 401, which would otherwise wipe the one
     // we are trying to obtain -- harmless here, since login has no token yet.
@@ -730,12 +810,17 @@ $("twofaBegin").onclick = async () => {
     // The secret is shown once. Grouped in fours because people transcribe
     // these by hand and an unbroken 32-character string is unreadable.
     const grouped = (result.secret || "").replace(/=+$/, "").replace(/(.{4})/g, "$1 ").trim();
+    // A template literal, not a quoted string: the line breaks are part of the
+    // markup, and a "..." string cannot hold one. Writing it as a broken
+    // quoted string is a parse error for the whole <script> block, which takes
+    // every handler on the page down with it -- see check-dashboard.sh, which
+    // now parses the script rather than only grepping it.
     $("twofaSecret").innerHTML =
-      "<b>Secret</b>
-" + esc(grouped) + "
+      `<b>Secret</b>
+${esc(grouped)}
 
 <b>Or paste this URI into your app</b>
-" + esc(result.uri);
+${esc(result.uri)}`;
     $("twofaOff").hidden = true;
     $("twofaEnrol").hidden = false;
     $("twofaMsg").textContent = "";

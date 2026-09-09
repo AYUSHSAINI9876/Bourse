@@ -69,7 +69,8 @@ bool isPublicPath(const std::string& path) {
   // make "auth is on and you are not signed in" indistinguishable from "this
   // build has no auth routes". It reveals only whether auth is enabled, which
   // any other endpoint already reveals by returning 401.
-  return path == "/" || path == "/health" || path == "/api/auth/login" || path == "/api/auth/me";
+  return path == "/" || path == "/health" || path == "/api/auth/login" ||
+         path == "/api/auth/register" || path == "/api/auth/me";
 }
 
 /// Runs a command through the same registry the RESP codec uses and renders the
@@ -218,6 +219,53 @@ void buildAuthApi(net::Router& router, exec::ServerContext& context) {
         response.setHeader("Cache-Control", "no-store");
       });
 
+  // ---- registration -----------------------------------------------------
+  //
+  // Public, like login. A deployment where accounts can only be minted by an
+  // administrator has to ship with one, which means either publishing its
+  // password or nobody being able to get in at all.
+  router.post("/api/auth/register", [requireAuthService](const net::HttpRequest& request,
+                                                         net::HttpResponse& response) {
+    auth::AuthService* service = requireAuthService(response);
+    if (service == nullptr) {
+      return;
+    }
+
+    const std::string username = net::jsonFieldOf(request.body, "username");
+    const std::string password = net::jsonFieldOf(request.body, "password");
+    if (username.empty() || password.empty()) {
+      response = net::HttpResponse::json(R"({"error":"username and password are required"})", 400);
+      return;
+    }
+
+    const Result<auth::Role> created = service->registerUser(username, password);
+    if (!created.ok()) {
+      // 409 for a taken name so the client can say "pick another" rather than
+      // showing the same generic validation error as a short password.
+      const bool taken = created.status().code() == ErrorCode::kAlreadyExists;
+      response = net::HttpResponse::json("{\"error\":" + jsonString(created.status().message()) + "}",
+                                         taken ? 409 : 400);
+      return;
+    }
+
+    // Signed in immediately. Making someone type the credentials they just
+    // chose into a second form is friction with nothing behind it -- the
+    // password was verified in this same request.
+    Result<auth::LoginResult> login = service->login(username, password, clientIdOf(request));
+    if (!login.ok()) {
+      response = net::HttpResponse::json(R"({"error":"account created; please sign in"})", 201);
+      return;
+    }
+
+    std::string payload = "{\"token\":" + jsonString(login.value().token);
+    payload += ",\"username\":" + jsonString(login.value().username);
+    payload += ",\"role\":" + roleJson(login.value().role);
+    payload += ",\"expires_at_ms\":" + std::to_string(login.value().expires_at_ms);
+    payload += "}";
+    response = net::HttpResponse::json(std::move(payload), 201);
+    response.setHeader("Cache-Control", "no-store");
+  });
+
   // ---- logout -----------------------------------------------------------
   router.post("/api/auth/logout", [&context](const net::HttpRequest& request, net::HttpResponse& response) {
     if (context.auth == nullptr) {
@@ -248,6 +296,12 @@ void buildAuthApi(net::Router& router, exec::ServerContext& context) {
                 context.auth->totpEnabled(request.principal.username))
                    ? "true"
                    : "false";
+    // Whether anyone has registered yet. A count would be an unauthenticated
+    // headcount of the deployment; the boolean answers the only question the
+    // sign-in screen actually has -- open on "create account" or "sign in" --
+    // and tells whoever is first that their account will be the administrator.
+    payload += ",\"has_accounts\":";
+    payload += (context.auth != nullptr && context.auth->userCount() > 0) ? "true" : "false";
     payload += "}";
     response = net::HttpResponse::json(std::move(payload));
     response.setHeader("Cache-Control", "no-store");

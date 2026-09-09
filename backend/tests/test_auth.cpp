@@ -21,6 +21,7 @@
 #include "bourse/auth/crypto.hpp"
 #include "bourse/auth/totp.hpp"
 #include "bourse/cache/keyspace.hpp"
+#include "bourse/core/file.hpp"
 #include "bourse/exec/command.hpp"
 #include "bourse/net/http_codec.hpp"
 
@@ -229,6 +230,260 @@ AuthConfig testConfig() {
   config.iterations = 1000;
   config.session_ttl_ms = 60 * 1000;
   return config;
+}
+
+// ---------------------------------------------------------------------------
+// Self-service registration
+// ---------------------------------------------------------------------------
+
+TEST(RegistrationTest, TheFirstAccountIsAnAdministratorAndTheRestAreTraders) {
+  AuthService auth(testConfig());
+
+  // Somebody has to be able to administer a fresh deployment. Doing it this
+  // way is what lets the server ship with no seeded account and no published
+  // password -- the state that previously locked everyone out of the demo.
+  const Result<Role> first = auth.registerUser("alice", "alice-password-1");
+  ASSERT_TRUE(first.ok()) << first.status().toString();
+  EXPECT_EQ(first.value(), Role::kAdmin);
+
+  const Result<Role> second = auth.registerUser("bob", "bob-password-12");
+  ASSERT_TRUE(second.ok()) << second.status().toString();
+  EXPECT_EQ(second.value(), Role::kTrader);
+
+  const Result<Role> third = auth.registerUser("carol", "carol-password-1");
+  ASSERT_TRUE(third.ok());
+  EXPECT_EQ(third.value(), Role::kTrader);
+  EXPECT_EQ(auth.userCount(), 3U);
+}
+
+TEST(RegistrationTest, RefusesATakenNameWithoutDisturbingTheExistingAccount) {
+  AuthService auth(testConfig());
+  ASSERT_TRUE(auth.registerUser("alice", "alice-password-1").ok());
+
+  const Result<Role> again = auth.registerUser("alice", "a-different-password");
+  ASSERT_FALSE(again.ok());
+  EXPECT_EQ(again.status().code(), ErrorCode::kAlreadyExists);
+
+  // The original password must still work: a failed signup that overwrote the
+  // account would be a trivial takeover of any username.
+  EXPECT_TRUE(auth.login("alice", "alice-password-1", "test").ok());
+  EXPECT_FALSE(auth.login("alice", "a-different-password", "test").ok());
+}
+
+TEST(RegistrationTest, AppliesTheSameUsernameAndPasswordRulesAsAddUser) {
+  AuthService auth(testConfig());
+  EXPECT_FALSE(auth.registerUser("has space", "a-good-password").ok());
+  EXPECT_FALSE(auth.registerUser("alice", "short").ok());
+  EXPECT_FALSE(auth.registerUser("alice", "password").ok());
+  EXPECT_EQ(auth.userCount(), 0U);
+
+  // A rejected signup must not consume the "first account is admin" slot.
+  const Result<Role> valid = auth.registerUser("alice", "alice-password-1");
+  ASSERT_TRUE(valid.ok());
+  EXPECT_EQ(valid.value(), Role::kAdmin);
+}
+
+TEST(RegistrationTest, ConcurrentSignupsProduceExactlyOneAdministrator) {
+  // The role is chosen under the same lock as the insert. Choosing it from a
+  // separate userCount() call would let two signups racing on a cold server
+  // both observe an empty store and both come back administrators.
+  AuthService auth(testConfig());
+  constexpr int kThreads = 8;
+  std::vector<std::thread> threads;
+  std::atomic<int> admins{0};
+  std::atomic<int> traders{0};
+  threads.reserve(kThreads);
+  for (int i = 0; i < kThreads; ++i) {
+    threads.emplace_back([&auth, &admins, &traders, i] {
+      const Result<Role> role = auth.registerUser("user" + std::to_string(i), "a-good-password-1");
+      if (!role.ok()) {
+        return;
+      }
+      if (role.value() == Role::kAdmin) {
+        ++admins;
+      } else if (role.value() == Role::kTrader) {
+        ++traders;
+      }
+    });
+  }
+  for (std::thread& thread : threads) {
+    thread.join();
+  }
+  EXPECT_EQ(admins.load(), 1);
+  EXPECT_EQ(traders.load(), kThreads - 1);
+}
+
+// ---------------------------------------------------------------------------
+// Durable accounts
+// ---------------------------------------------------------------------------
+
+/// A unique path per test, removed on destruction. Accounts are written to a
+/// real file here rather than a mock: the failure this guards against is a
+/// restart losing every account, and only the round trip through the
+/// filesystem actually demonstrates it does not.
+class AccountStorePath {
+ public:
+  AccountStorePath() {
+    static std::atomic<int> counter{0};
+    path_ = "./bourse-test-accounts-" + std::to_string(counter.fetch_add(1)) + ".users";
+    std::remove(path_.c_str());
+  }
+  ~AccountStorePath() { std::remove(path_.c_str()); }
+
+  AccountStorePath(const AccountStorePath&) = delete;
+  AccountStorePath& operator=(const AccountStorePath&) = delete;
+
+  [[nodiscard]] const std::string& get() const { return path_; }
+
+ private:
+  std::string path_;
+};
+
+TEST(AccountStoreTest, AccountsSurviveARestart) {
+  const AccountStorePath store;
+  {
+    AuthService auth(testConfig());
+    ASSERT_TRUE(auth.openStore(store.get()).ok());
+    ASSERT_TRUE(auth.registerUser("alice", "alice-password-1").ok());
+    ASSERT_TRUE(auth.registerUser("bob", "bob-password-12").ok());
+  }
+
+  // A brand new service, as after a process restart.
+  AuthService reopened(testConfig());
+  ASSERT_TRUE(reopened.openStore(store.get()).ok());
+  EXPECT_EQ(reopened.userCount(), 2U);
+
+  const Result<LoginResult> alice = reopened.login("alice", "alice-password-1", "test");
+  ASSERT_TRUE(alice.ok()) << alice.status().toString();
+  EXPECT_EQ(alice.value().role, Role::kAdmin);
+
+  const Result<LoginResult> bob = reopened.login("bob", "bob-password-12", "test");
+  ASSERT_TRUE(bob.ok());
+  EXPECT_EQ(bob.value().role, Role::kTrader);
+
+  // The wrong password must still be wrong after a reload -- proving the hash
+  // round-tripped rather than the file simply being trusted.
+  EXPECT_FALSE(reopened.login("alice", "bob-password-12", "test").ok());
+}
+
+TEST(AccountStoreTest, SessionsAreDeliberatelyNotPersisted) {
+  const AccountStorePath store;
+  std::string token;
+  {
+    AuthService auth(testConfig());
+    ASSERT_TRUE(auth.openStore(store.get()).ok());
+    ASSERT_TRUE(auth.registerUser("alice", "alice-password-1").ok());
+    const Result<LoginResult> login = auth.login("alice", "alice-password-1", "test");
+    ASSERT_TRUE(login.ok());
+    token = login.value().token;
+  }
+
+  AuthService reopened(testConfig());
+  ASSERT_TRUE(reopened.openStore(store.get()).ok());
+  // Signing everyone out across a restart is the safe direction to fail, and a
+  // token surviving in a file would be a credential at rest.
+  EXPECT_FALSE(reopened.authenticate(token).ok());
+  EXPECT_EQ(reopened.sessionCount(), 0U);
+}
+
+TEST(AccountStoreTest, RoleChangesAndDeletionsAreWrittenThrough) {
+  const AccountStorePath store;
+  {
+    AuthService auth(testConfig());
+    ASSERT_TRUE(auth.openStore(store.get()).ok());
+    ASSERT_TRUE(auth.registerUser("alice", "alice-password-1").ok());
+    ASSERT_TRUE(auth.registerUser("bob", "bob-password-12").ok());
+    ASSERT_TRUE(auth.setRole("bob", Role::kViewer).ok());
+    ASSERT_TRUE(auth.registerUser("carol", "carol-password-1").ok());
+    ASSERT_TRUE(auth.removeUser("carol").ok());
+  }
+
+  AuthService reopened(testConfig());
+  ASSERT_TRUE(reopened.openStore(store.get()).ok());
+  EXPECT_EQ(reopened.userCount(), 2U);
+  EXPECT_FALSE(reopened.hasUser("carol"));
+
+  const Result<LoginResult> bob = reopened.login("bob", "bob-password-12", "test");
+  ASSERT_TRUE(bob.ok());
+  EXPECT_EQ(bob.value().role, Role::kViewer);
+}
+
+TEST(AccountStoreTest, ARewrittenPasswordIsTheOneThatReloads) {
+  const AccountStorePath store;
+  {
+    AuthService auth(testConfig());
+    ASSERT_TRUE(auth.openStore(store.get()).ok());
+    ASSERT_TRUE(auth.registerUser("alice", "alice-password-1").ok());
+    ASSERT_TRUE(auth.setPassword("alice", "a-brand-new-password").ok());
+  }
+
+  AuthService reopened(testConfig());
+  ASSERT_TRUE(reopened.openStore(store.get()).ok());
+  EXPECT_TRUE(reopened.login("alice", "a-brand-new-password", "test").ok());
+  EXPECT_FALSE(reopened.login("alice", "alice-password-1", "test").ok());
+}
+
+TEST(AccountStoreTest, RefusesAFileItDoesNotUnderstand) {
+  const AccountStorePath store;
+  // Silently treating an unreadable store as "no accounts yet" would hand the
+  // next person to register an administrator account on a populated server.
+  ASSERT_TRUE(File::writeWholeFile(store.get(), "bourse-users 99\nu alice admin 0 0 hash\n").ok());
+  AuthService auth(testConfig());
+  const Status opened = auth.openStore(store.get());
+  EXPECT_FALSE(opened.ok());
+  EXPECT_EQ(opened.code(), ErrorCode::kCorruption);
+}
+
+TEST(AccountStoreTest, TwoFactorEnrolmentSurvivesARestart) {
+  const AccountStorePath store;
+  // A fixed clock, so the code generated here and the step recorded against it
+  // are the same on both sides of the restart.
+  static std::int64_t fake_now = 1'700'000'000'000;
+  const auto clock = [] { return fake_now; };
+
+  std::string secret;
+  {
+    AuthService auth(testConfig());
+    auth.setClockForTesting(clock);
+    ASSERT_TRUE(auth.openStore(store.get()).ok());
+    ASSERT_TRUE(auth.registerUser("alice", "alice-password-1").ok());
+    const Result<TotpEnrolment> begun = auth.beginTotpEnrolment("alice", "Bourse");
+    ASSERT_TRUE(begun.ok()) << begun.status().toString();
+    secret = begun.value().base32_secret;
+
+    const Result<std::string> raw = base32Decode(secret);
+    ASSERT_TRUE(raw.ok());
+    const Result<std::string> code = totp(raw.value(), fake_now / 1000);
+    ASSERT_TRUE(code.ok());
+    ASSERT_TRUE(auth.confirmTotpEnrolment("alice", code.value()).ok());
+  }
+
+  AuthService reopened(testConfig());
+  reopened.setClockForTesting(clock);
+  ASSERT_TRUE(reopened.openStore(store.get()).ok());
+  EXPECT_TRUE(reopened.totpEnabled("alice"));
+
+  const Result<std::string> raw = base32Decode(secret);
+  ASSERT_TRUE(raw.ok());
+
+  // The password alone is not enough: 2FA is still enforced after the reload.
+  EXPECT_FALSE(reopened.login("alice", "alice-password-1", "test").ok());
+
+  // The code that confirmed enrolment is refused, because the step it was
+  // accepted for was persisted alongside the secret. Without that, a restart
+  // would reopen the replay window on any code an attacker had just observed.
+  const Result<std::string> used = totp(raw.value(), fake_now / 1000);
+  ASSERT_TRUE(used.ok());
+  EXPECT_FALSE(reopened.login("alice", "alice-password-1", "test", used.value()).ok());
+
+  // The next step's code works, which is only possible if the secret itself
+  // round-tripped through the file rather than being regenerated.
+  fake_now += kTotpPeriodSeconds * 1000;
+  const Result<std::string> fresh = totp(raw.value(), fake_now / 1000);
+  ASSERT_TRUE(fresh.ok());
+  const Result<LoginResult> with_code =
+      reopened.login("alice", "alice-password-1", "test", fresh.value());
+  EXPECT_TRUE(with_code.ok()) << with_code.status().toString();
 }
 
 TEST(AuthServiceTest, LoginIssuesAUsableToken) {

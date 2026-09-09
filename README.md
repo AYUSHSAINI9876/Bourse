@@ -26,20 +26,22 @@
 | **Dashboard** | **<https://bourse-mocha.vercel.app>** |
 | **API** | **<https://bourse-kn9j.onrender.com>** |
 
-Sign in read-only:
-
-```
-username:  guest
-password:  explore-bourse-2026
-```
+**Create an account** on the sign-in screen — pick any username and password. There is no
+demo login to copy from here, and no password shipped in this repository: accounts are made by
+the people using the server.
 
 > **First load takes ~50 seconds.** The backend runs on Render's free tier, which sleeps after 15 minutes idle. The dashboard will say "server unreachable" while it wakes — reload once and it comes up. Every load after that is instant.
 
-`guest` is a **viewer**: it can read everything and write nothing. Try `SET k v` in the console and the server answers `NOPERM` — that refusal comes from the same permission check that guards the RESP port, which is the point of the whole auth layer.
+New accounts are **traders**: they can read everything, write keys and place orders, but not
+`FLUSHALL` and not manage users. The exception is the very first account on an empty server,
+which becomes the **administrator** — somebody has to be, and the alternative is a password
+printed in a public README. Try `FLUSHALL` in the console as a trader and the server answers
+`NOPERM`; that refusal comes from the same permission check that guards the RESP port, which is
+the point of the whole auth layer.
 
 **Once you are in, in about ninety seconds:**
 
-1. **Command console** — `ORDER AAPL SELL LIMIT 10 100.50`, then `ORDER AAPL BUY LIMIT 4 101.00`. Watch the depth ladder and trade tape react. *(Read-only as `guest`; the demo server has live data from other visitors.)*
+1. **Command console** — `ORDER AAPL SELL LIMIT 10 100.50`, then `ORDER AAPL BUY LIMIT 4 101.00`. Watch the depth ladder and trade tape react.
 2. **SQL panel** — `SELECT * FROM fills` then hit **Explain** to see the query plan with live row counts.
 3. **Keyspace** — scan `*` to browse what is in the store.
 4. **Sparklines** — commands/sec, p99 latency and key count, all sampled from the server's own histogram.
@@ -54,11 +56,13 @@ curl -i https://bourse-kn9j.onrender.com/api/stats
 # HTTP/1.1 401 Unauthorized
 # WWW-Authenticate: Bearer realm="bourse"
 
-curl -X POST https://bourse-kn9j.onrender.com/api/auth/login \
+curl -X POST https://bourse-kn9j.onrender.com/api/auth/register \
   -H 'Content-Type: application/json' \
-  -d '{"username":"guest","password":"explore-bourse-2026"}'
-# {"token":"…","username":"guest","role":"viewer","expires_at_ms":…}
+  -d '{"username":"your-name","password":"a-password-you-pick"}'
+# {"token":"…","username":"your-name","role":"trader","expires_at_ms":…}
 ```
+
+Signing in again later uses the same shape against `/api/auth/login`.
 
 <p align="center">
   <img src="docs/img/dashboard.svg" alt="Panel map of the Bourse dashboard: header with identity and role badge, server stats with sparklines, order book depth ladder, trade tape, latency histogram and order entry, command console, keyspace browser, SQL workbench and admin-only user management" width="100%">
@@ -559,7 +563,7 @@ In a browser every one of those failures looks identical: a blank page and a con
 |---|---|
 | Frontend | Vercel, `frontend/` as the project root, `BOURSE_API_BASE` stamped in at build time |
 | Backend | Render free tier, Singapore, `backend/Dockerfile` built from the repository root |
-| Auth | On. Admin from `$BOURSE_ADMIN_PASSWORD`, read-only `guest` from `$BOURSE_DEMO_PASSWORD` |
+| Auth | On. No seeded accounts: people register, and the first account on an empty server is the administrator |
 | Persistence | WAL + snapshots to the container filesystem |
 | Redeploys | Automatic on every push to `main`, both halves |
 

@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <array>
+#include <sstream>
 #include <utility>
 
 #include "bourse/auth/crypto.hpp"
 #include "bourse/auth/totp.hpp"
 #include "bourse/core/clock.hpp"
+#include "bourse/core/file.hpp"
 #include "bourse/core/logger.hpp"
 
 namespace bourse::auth {
@@ -30,6 +32,10 @@ constexpr std::string_view kBannedPasswords[] = {
     "password", "password1", "12345678", "123456789", "qwertyui",
     "letmein1", "admin123",  "changeme", "bourse123", "iloveyou",
 };
+
+/// First line of the account file. Versioned so a future format change is a
+/// detected refusal rather than a silent misparse of the wrong fields.
+constexpr std::string_view kStoreHeader = "bourse-users 1";
 
 }  // namespace
 
@@ -111,7 +117,52 @@ Status AuthService::addUser(std::string_view username, std::string_view password
   record.created_at_ms = now();
   record.password_hash = std::move(hash).value();
   users_.emplace(key, std::move(record));
-  return Status::success();
+  return persistLocked();
+}
+
+Result<Role> AuthService::registerUser(std::string_view username, std::string_view password) {
+  if (const Status valid = validateUsername(username); !valid.ok()) {
+    return valid;
+  }
+  if (const Status valid = validatePassword(password); !valid.ok()) {
+    return valid;
+  }
+
+  // Hashed before the lock: PBKDF2 is ~100ms by design, and holding the mutex
+  // across it would let one signup stall every login on the server.
+  Result<std::string> hash = hashPassword(password, config_.iterations);
+  if (!hash.ok()) {
+    return hash.status();
+  }
+
+  const std::lock_guard<std::mutex> lock(mutex_);
+  const std::string key(username);
+  if (users_.find(key) != users_.end()) {
+    return Status::alreadyExists("that username is taken");
+  }
+
+  // Deciding the role inside the lock is the point: checking "is the store
+  // empty" from the caller and inserting afterwards would let two signups
+  // arriving together both find it empty and both become administrators.
+  const Role role = users_.empty() ? Role::kAdmin : Role::kTrader;
+
+  UserRecord record;
+  record.username = key;
+  record.role = role;
+  record.created_at_ms = now();
+  record.password_hash = std::move(hash).value();
+  users_.emplace(key, std::move(record));
+
+  if (const Status saved = persistLocked(); !saved.ok()) {
+    // The account exists in memory but would not survive a restart. Rolling
+    // back is the honest outcome: better a signup that fails loudly than one
+    // that silently disappears the next time the process starts.
+    users_.erase(key);
+    return saved;
+  }
+
+  BOURSE_LOG_INFO("registered '", key, "' as ", toString(role));
+  return role;
 }
 
 Status AuthService::setPassword(std::string_view username, std::string_view password) {
@@ -137,7 +188,7 @@ Status AuthService::setPassword(std::string_view username, std::string_view pass
         (session->second.username == it->second.username) ? sessions_.erase(session) : std::next(session);
   }
   failures_.erase(std::string(username));
-  return Status::success();
+  return persistLocked();
 }
 
 Status AuthService::setRole(std::string_view username, Role role) {
@@ -157,7 +208,7 @@ Status AuthService::setRole(std::string_view username, Role role) {
       session.role = role;
     }
   }
-  return Status::success();
+  return persistLocked();
 }
 
 Status AuthService::removeUser(std::string_view username) {
@@ -173,7 +224,7 @@ Status AuthService::removeUser(std::string_view username) {
     session = (session->second.username == removed) ? sessions_.erase(session) : std::next(session);
   }
   failures_.erase(removed);
-  return Status::success();
+  return persistLocked();
 }
 
 std::vector<UserRecord> AuthService::listUsers() const {
@@ -541,6 +592,14 @@ Result<TotpEnrolment> AuthService::beginTotpEnrolment(std::string_view username,
   state.enabled = false;
   state.last_step = -1;
 
+  // Saved before the secret leaves the process: if a restart landed between
+  // handing out the QR code and confirming it, enrolment would fail against a
+  // secret the server no longer had.
+  if (const Status saved = persistLocked(); !saved.ok()) {
+    totp_.erase(std::string(username));
+    return saved;
+  }
+
   TotpEnrolment out;
   out.base32_secret = base32.value();
   out.provisioning_uri = totpProvisioningUri(issuer, username, base32.value());
@@ -567,7 +626,7 @@ Status AuthService::confirmTotpEnrolment(std::string_view username, std::string_
   it->second.last_step = check.step;
   user->second.totp_enabled = true;
   BOURSE_LOG_INFO("two-factor enabled for '", username, "'");
-  return Status::success();
+  return persistLocked();
 }
 
 Status AuthService::disableTotp(std::string_view username, std::string_view password) {
@@ -595,7 +654,7 @@ Status AuthService::disableTotp(std::string_view username, std::string_view pass
     user->second.totp_enabled = false;
   }
   BOURSE_LOG_WARN("two-factor disabled for '", username, "'");
-  return Status::success();
+  return persistLocked();
 }
 
 bool AuthService::totpEnabled(std::string_view username) const {
@@ -660,6 +719,120 @@ std::size_t AuthService::sweepExpired(std::int64_t now_ms) {
 std::size_t AuthService::sessionCount() const {
   const std::lock_guard<std::mutex> lock(mutex_);
   return sessions_.size();
+}
+
+// ---------------------------------------------------------------------------
+// Durability
+// ---------------------------------------------------------------------------
+
+Status AuthService::persistLocked() const {
+  if (store_path_.empty()) {
+    return Status::success();
+  }
+
+  // Every field here is space-free by construction -- usernames are validated
+  // to [A-Za-z0-9_.-], the PBKDF2 encoding is '$'-delimited hex, role names
+  // are single words and the rest are integers -- so whitespace splitting
+  // round-trips without needing any quoting or escaping.
+  std::ostringstream out;
+  out << kStoreHeader << '\n';
+  for (const auto& [ignored, record] : users_) {
+    out << "u " << record.username << ' ' << toString(record.role) << ' ' << record.created_at_ms << ' '
+        << (record.totp_enabled ? 1 : 0) << ' ' << record.password_hash << '\n';
+  }
+  for (const auto& [name, state] : totp_) {
+    if (state.secret.empty()) {
+      continue;
+    }
+    out << "t " << name << ' ' << (state.enabled ? 1 : 0) << ' ' << state.last_step << ' '
+        << toHex(state.secret.data(), state.secret.size()) << '\n';
+  }
+
+  // Written beside the real file and renamed over it. rename(2) is atomic
+  // within a directory, so a crash leaves either the old table or the new one
+  // -- never a half-written file that loses every account at next start.
+  const std::string temporary = store_path_ + ".tmp";
+  if (const Status written = File::writeWholeFile(temporary, out.str()); !written.ok()) {
+    BOURSE_LOG_ERROR("cannot write account store: ", written.toString());
+    return written;
+  }
+  if (const Status moved = File::rename(temporary, store_path_); !moved.ok()) {
+    BOURSE_LOG_ERROR("cannot replace account store: ", moved.toString());
+    return moved;
+  }
+  return Status::success();
+}
+
+Status AuthService::openStore(const std::string& path) {
+  const std::lock_guard<std::mutex> lock(mutex_);
+  store_path_ = path;
+
+  if (!File::exists(path)) {
+    // Nothing to load. Write the empty table now rather than at first signup,
+    // so a permissions or path problem surfaces at startup instead of in a
+    // user's face halfway through creating an account.
+    return persistLocked();
+  }
+
+  Result<std::string> contents = File::readWholeFile(path);
+  if (!contents.ok()) {
+    return contents.status();
+  }
+
+  std::istringstream in(contents.value());
+  std::string header;
+  if (!std::getline(in, header) || header != kStoreHeader) {
+    return Status::corruption("account store has an unrecognised header: '" + header + "'");
+  }
+
+  std::unordered_map<std::string, UserRecord> users;
+  std::unordered_map<std::string, TotpState> totp;
+  std::string line;
+  int number = 1;
+  while (std::getline(in, line)) {
+    ++number;
+    if (line.empty()) {
+      continue;
+    }
+    std::istringstream fields(line);
+    std::string kind;
+    fields >> kind;
+    if (kind == "u") {
+      UserRecord record;
+      std::string role;
+      int two_factor = 0;
+      fields >> record.username >> role >> record.created_at_ms >> two_factor >> record.password_hash;
+      if (record.username.empty() || record.password_hash.empty() || !parseRole(role, record.role)) {
+        return Status::corruption("account store line " + std::to_string(number) + " is malformed");
+      }
+      record.totp_enabled = two_factor != 0;
+      const std::string name = record.username;
+      users.emplace(name, std::move(record));
+    } else if (kind == "t") {
+      std::string name;
+      std::string secret_hex;
+      int enabled = 0;
+      std::int64_t last_step = -1;
+      fields >> name >> enabled >> last_step >> secret_hex;
+      Result<std::string> secret = fromHex(secret_hex);
+      if (name.empty() || !secret.ok()) {
+        return Status::corruption("account store line " + std::to_string(number) + " is malformed");
+      }
+      TotpState state;
+      state.secret = std::move(secret).value();
+      state.enabled = enabled != 0;
+      state.last_step = last_step;
+      totp.emplace(name, std::move(state));
+    } else {
+      return Status::corruption("account store line " + std::to_string(number) +
+                                    " has an unknown record type '" + kind + "'");
+    }
+  }
+
+  users_ = std::move(users);
+  totp_ = std::move(totp);
+  BOURSE_LOG_INFO("loaded ", users_.size(), " account(s) from ", path);
+  return Status::success();
 }
 
 }  // namespace bourse::auth

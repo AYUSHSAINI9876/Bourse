@@ -55,20 +55,17 @@ struct Config {
   /// Authentication. Off by default so a local run and the existing smoke
   /// suites need no credentials; a public deployment turns it on.
   bool auth_enabled = false;
-  /// Bootstrap administrator, created at startup when auth is enabled. An
-  /// empty password means "generate one and log it once", which is how the
-  /// server can be deployed without a secret being committed anywhere.
-  std::string admin_user = "admin";
-  std::string admin_password;
 
-  /// Optional read-only account, seeded at startup like the administrator.
+  /// Optional bootstrap administrator.
   ///
-  /// Exists so a public demo has something to hand out. Users created at
-  /// runtime live only in memory and vanish on restart, so a README could not
-  /// advertise them; this one is configuration and comes back every time.
-  /// Empty (the default) creates nothing.
-  std::string demo_user;
-  std::string demo_password;
+  /// Empty by default, and a deployment is expected to leave it that way: the
+  /// first account registered through `POST /api/auth/register` becomes the
+  /// administrator, so nothing has to ship with a password. Set it only to
+  /// pre-create a named administrator -- an automated test, or recovering a
+  /// deployment whose admin account was deleted. An empty password with a
+  /// non-empty name means "generate one and log it once".
+  std::string admin_user;
+  std::string admin_password;
   std::int64_t session_ttl_seconds = 12 * 60 * 60;
   std::uint32_t auth_iterations = 210000;
 
@@ -136,9 +133,12 @@ class BourseServer {
   /// Creates the bootstrap administrator. Generates and logs a password when
   /// none was configured.
   Status bootstrapAdministrator();
+  /// Loads the accounts file and keeps it up to date from then on.
+  Status openAccountStore();
 
   [[nodiscard]] std::string snapshotPath() const;
   [[nodiscard]] std::string walPath() const;
+  [[nodiscard]] std::string accountStorePath() const;
 
   Config config_;
   cache::Keyspace keyspace_;

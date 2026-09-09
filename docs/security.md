@@ -310,18 +310,28 @@ is identical in both cases too, and a test asserts the two messages are equal.
 Stated plainly, because a security document that only lists strengths is
 marketing.
 
-**Users are not persisted.** They live in memory and are seeded at startup from
-`$BOURSE_ADMIN_USER` / `$BOURSE_ADMIN_PASSWORD`, plus an optional read-only
-account from `$BOURSE_DEMO_USER` / `$BOURSE_DEMO_PASSWORD`. Users created at
-runtime with `USER ADD` are lost on restart.
+**Accounts outlive the process, not the instance.** They are written to
+`bourse.users` in the data directory and reloaded at startup, so a restart, a
+crash or a redeploy of the same container keeps them. A host with an ephemeral
+filesystem — a free Render service, for one — starts from the image when the
+instance is replaced, and the accounts go with it. The file holds PBKDF2
+verifiers and TOTP secrets, never passwords, and is rewritten whole and renamed
+into place so a crash mid-write cannot truncate it.
 
-The demo account exists precisely because of that limitation: a public
-deployment needs credentials it can publish, and an account created through the
-dashboard would vanish the next time the host recycled the instance — leaving a
-README advertising a login that no longer works. Seeding it from configuration
-makes it come back every time. It is a `viewer`, so publishing its password
-costs nothing: it cannot write, cannot `FLUSHALL` and cannot manage users, and
-`smoke-deploy.sh` asserts all three.
+**Anyone can register, and the first person to do so is the administrator.**
+That is the deliberate trade: the alternative is shipping a seeded account,
+which means either publishing its password or locking everyone out. On an empty
+server the administrator slot is genuinely open, so a deployment that matters
+should be claimed immediately after it is created — or pre-seeded with
+`$BOURSE_ADMIN_USER` / `$BOURSE_ADMIN_PASSWORD`, which closes the slot before
+anyone else can reach it. Every account after the first is a `trader`: it can
+write keys and place orders, but not `FLUSHALL`, not `CONFIG`, and not manage
+users.
+
+**Registration is not rate-limited per address.** Failed *logins* are throttled
+per account, but nothing stops a script creating many accounts. On a public
+demo that is noise rather than escalation — every one of them is a trader — but
+it is a real gap in front of anything that matters.
 
 This is deliberate. Users *could* be journalled through the existing WAL hook —
 `USER` would only have to answer `isWrite()` honestly — but replaying

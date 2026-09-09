@@ -16,6 +16,14 @@
 #   3. no external resource sneaked in -- a CDN link would break both the
 #      embedded copy (no network from inside a container) and the artifact
 #      Content-Security-Policy
+#   4. the script actually parses
+#
+# Check 4 exists because checks 1-3 did not catch the worst outage this file
+# has had. A string literal was written across two lines, which is a parse
+# error for the entire <script> block: every handler failed to attach, the
+# sign-in dialog never opened, and the page rendered perfectly while doing
+# nothing at all. Greps cannot see that. A parser can, so one is used when a
+# JavaScript engine is available.
 #
 #   bash scripts/check-dashboard.sh
 #
@@ -103,6 +111,71 @@ print(f"  {len(refs)} element references checked, {len(ids)} ids declared")
 sys.exit(1 if failures else 0)
 PY
 status=$?
+
+# ---------------------------------------------------------------------------
+# Does the script parse?
+#
+# Handed to a real JavaScript engine rather than checked with a pattern. The
+# fault this exists to catch was a string literal written across two lines,
+# which is a parse error for the entire <script> block: every handler failed to
+# attach, the sign-in dialog never opened, and the page rendered perfectly
+# while doing nothing at all. All eight verify-all stages were green through
+# it, because every check above this one is a grep, and a grep cannot tell a
+# parse error from prose.
+#
+# A hand-written scanner was tried first and produced false positives on the
+# regex literals in esc(); lexing JavaScript correctly is its own project, and
+# a check that cries wolf gets ignored. node is on every CI runner and on most
+# developer machines. Where it is missing this reports "skip" rather than
+# printing a pass it did not earn.
+# ---------------------------------------------------------------------------
+echo
+# `node` on a Linux box, `node.exe` when this is WSL borrowing the Windows
+# install. Either is a real JavaScript engine, which is the whole requirement.
+node_bin=""
+if command -v node >/dev/null 2>&1; then
+  node_bin="node"
+elif command -v node.exe >/dev/null 2>&1; then
+  node_bin="node.exe"
+fi
+
+if [ -n "$node_bin" ]; then
+  # node --check refuses a file with no .js extension, so the extracted script
+  # gets a real name. It is written beside the dashboard rather than in /tmp:
+  # under Git Bash on Windows, python3 and node resolve a /tmp path to two
+  # different places and node reports the file as missing.
+  script_js="$(dirname "$dashboard")/.dashboard-parse-check.js"
+  python3 - "$dashboard" "$script_js" <<'PY'
+import re, sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    html = handle.read()
+
+# Inline blocks only. There are no src= scripts -- check 3 above enforces that
+# -- so this is the whole of the page's behaviour.
+blocks = re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", html, re.S)
+with open(sys.argv[2], "w", encoding="utf-8") as out:
+    out.write("\n".join(blocks))
+PY
+  # node.exe cannot read a /mnt/c path; wslpath gives it the Windows form.
+  node_arg="$script_js"
+  if [ "$node_bin" = "node.exe" ] && command -v wslpath >/dev/null 2>&1; then
+    node_arg="$(wslpath -w "$script_js")"
+  fi
+
+  if "$node_bin" --check "$node_arg" 2>"$script_js.err"; then
+    echo "  ok   the dashboard script parses"
+  else
+    echo "  FAIL the dashboard script does not parse"
+    sed 's/^/       /' "$script_js.err"
+    echo "       A parse error here disables every handler on the page."
+    status=1
+  fi
+  rm -f "$script_js" "$script_js.err"
+else
+  echo "  skip node not found; the script was not parsed"
+  echo "       CI runs this check; install node to run it here too."
+fi
 
 echo
 echo "==================================="

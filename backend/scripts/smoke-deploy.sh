@@ -187,7 +187,6 @@ echo "-- authentication --"
 
 auth_port=18081
 BOURSE_AUTH=yes BOURSE_ADMIN_USER=root BOURSE_ADMIN_PASSWORD=root-password-1 \
-BOURSE_DEMO_USER=guest BOURSE_DEMO_PASSWORD=guest-password-1 \
   "$server_bin" --host 127.0.0.1 --http-port "$auth_port" --port 16381 \
   --dir "$work_dir/auth-data" --auth-iterations 1000 --log-level error \
   >"$work_dir/auth.log" 2>&1 &
@@ -282,26 +281,54 @@ else
   check "logout revokes the token"        "401" \
     "$(curl -s -o /dev/null -w '%{http_code}' "$auth_base/api/stats" -H "$reader_header")"
 
-  # The seeded read-only account is what lets a public deployment be explored
-  # without publishing admin credentials, so its role has to be exactly right.
-  # Unlike an account created at runtime it survives a restart, which is the
-  # whole reason a README can advertise it.
-  demo_login="$(curl -fsS -X POST "$auth_base/api/auth/login" \
+  # ---- self-service registration --------------------------------------
+  #
+  # This is how anyone gets an account: there is no seeded demo login to
+  # publish, and no shipped password to guess. What matters is the role a new
+  # account lands on -- a signup that arrived as an administrator would hand
+  # the deployment to whoever registered second.
+  signup="$(curl -s -X POST "$auth_base/api/auth/register" \
     -H 'Content-Type: application/json' \
-    -d '{"username":"guest","password":"guest-password-1"}')"
-  check "seeded demo account can log in"  '"token"'          "$demo_login"
-  check "demo account is a viewer"        '"role":"viewer"'  "$demo_login"
+    -d '{"username":"newcomer","password":"newcomer-password-1"}')"
+  check "signup returns a token"          '"token"'           "$signup"
+  check "signup names the account"        '"username":"newcomer"' "$signup"
+  check "a later signup is a trader"      '"role":"trader"'   "$signup"
 
-  demo_token="$(printf '%s' "$demo_login" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
-  check "demo account can read"           "200" \
+  new_token="$(printf '%s' "$signup" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+  check "new account is signed in"        "200" \
     "$(curl -s -o /dev/null -w '%{http_code}' "$auth_base/api/stats" \
-       -H "Authorization: Bearer $demo_token")"
-  check "demo account cannot write"       "403" \
+       -H "Authorization: Bearer $new_token")"
+  check "new account can write"           "200" \
     "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$auth_base/api/command" \
-       -H "Authorization: Bearer $demo_token" -d 'SET nope nope')"
-  check "demo account cannot FLUSHALL"    "403" \
+       -H "Authorization: Bearer $new_token" -d 'SET signup-key ok')"
+  check "new account can trade"           "200" \
     "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$auth_base/api/command" \
-       -H "Authorization: Bearer $demo_token" -d 'FLUSHALL')"
+       -H "Authorization: Bearer $new_token" -d 'ORDER AAPL BUY LIMIT 1 10.00')"
+
+  # A trader is not an administrator. These two refusals are the whole reason
+  # the first-account-is-admin rule is safe to expose publicly.
+  check "new account cannot FLUSHALL"     "403" \
+    "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$auth_base/api/command" \
+       -H "Authorization: Bearer $new_token" -d 'FLUSHALL')"
+  check "new account cannot list users"   "403" \
+    "$(curl -s -o /dev/null -w '%{http_code}' "$auth_base/api/auth/users" \
+       -H "Authorization: Bearer $new_token")"
+
+  check "a taken username is refused"     "409" \
+    "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$auth_base/api/auth/register" \
+       -H 'Content-Type: application/json' \
+       -d '{"username":"newcomer","password":"another-password-1"}')"
+  check "a weak password is refused"      "400" \
+    "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$auth_base/api/auth/register" \
+       -H 'Content-Type: application/json' -d '{"username":"weakling","password":"short"}')"
+  check "an invalid username is refused"  "400" \
+    "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$auth_base/api/auth/register" \
+       -H 'Content-Type: application/json' \
+       -d '{"username":"has space","password":"a-good-password-1"}')"
+
+  # The sign-in screen uses this to decide which tab to open on.
+  check "identity reports accounts exist" '"has_accounts":true' \
+    "$(curl -fsS "$auth_base/api/auth/me")"
 
   # ---- two-factor and sessions ----------------------------------------
   #

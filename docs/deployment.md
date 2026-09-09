@@ -185,23 +185,37 @@ you a second, frontend-shaped link.
 
 ### 1.5 Turn on authentication
 
-A deployment created from `render.yaml` already has authentication on: the
-blueprint declares the variables below, so a fork comes up with auth enforced,
-a generated admin password, and the read-only `guest` account the README
-advertises. There is nothing to click.
+A deployment created from `render.yaml` already has authentication on. The
+blueprint declares one variable and no credentials at all:
 
 | Key | Value | Where it comes from |
 |---|---|---|
 | `BOURSE_AUTH` | `yes` | `render.yaml` |
-| `BOURSE_ADMIN_USER` | `admin` | `render.yaml` |
-| `BOURSE_ADMIN_PASSWORD` | a long random string | `generateValue: true` — Render generates it on first deploy and shows it under **Environment** |
-| `BOURSE_DEMO_USER` | `guest` | `render.yaml` |
-| `BOURSE_DEMO_PASSWORD` | `explore-bourse-2026` | `render.yaml` |
 
-The blueprint is the source of truth on purpose. The demo account was added to
-the server and to the README before it was added here, and the result was a
-front page publishing a login that a freshly deployed instance did not have.
-Configuration the documentation depends on belongs in the repository.
+There is nothing to click and nothing to copy down. Accounts are created by
+people registering on the sign-in screen, and **the first account on an empty
+server becomes the administrator** — so the deployment ships with no password
+to publish and none to guess.
+
+This replaced a seeded read-only account whose password was printed in the
+README. That approach needs the credentials to exist in the repository, which
+means anyone who reads the repository has them; and it had already failed once
+in the more boring way, when the account was added to the server and the README
+before it was added to the blueprint, leaving a front page advertising a login
+that a freshly deployed instance did not have.
+
+`BOURSE_ADMIN_USER` and `BOURSE_ADMIN_PASSWORD` still exist and still work.
+They pre-create a named administrator, which is what you want for an automated
+test or for recovering a deployment whose admin account was deleted — not for
+a fresh one.
+
+**Accounts survive a restart of the process, not a replacement of the
+instance.** They are written to `bourse.users` in `--dir` and reloaded at
+startup. A free Render service has no persistent disk, so a deploy or an idle
+recycle starts from the image again and the accounts are gone with it — sign up
+again, and the first person to do so is the administrator again. Attaching a
+disk mounted at `/home/bourse/data` on a paid plan is the entire fix; the
+server already writes there.
 
 Deploying without the blueprint — a service created by hand in the web UI —
 means setting these yourself under **Environment** → **Add Environment
@@ -264,13 +278,22 @@ curl -X POST https://bourse.onrender.com/api/auth/login \
 the dashboard can load its login screen.
 
 Roles are `viewer` (read-only), `trader` (+ writes and orders) and `admin`
-(+ `FLUSHALL`, `CONFIG`, user management). Add a read-only account for anyone
-you share the link with:
+(+ `FLUSHALL`, `CONFIG`, user management). People who register get `trader`.
+An administrator can create an account at any role directly, which is how you
+make a read-only login for someone you are sharing the link with:
 
 ```bash
 curl -X POST https://bourse.onrender.com/api/auth/users \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"username":"guest","password":"a-long-guest-password","role":"viewer"}'
+  -d '{"username":"reader","password":"a-long-reader-password","role":"viewer"}'
+```
+
+An administrator can also demote a noisy account rather than deleting it:
+
+```bash
+curl -X POST https://bourse.onrender.com/api/auth/users \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"username":"someone","role":"viewer"}'
 ```
 
 Full model, including what it deliberately does *not* protect:

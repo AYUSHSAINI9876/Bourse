@@ -110,12 +110,6 @@ Status applyEnvironmentDefaults(Config& config) {
     // a server that silently ignored it would be enforcing nothing.
     config.auth_enabled = true;
   }
-  if (const char* user = std::getenv("BOURSE_DEMO_USER"); user != nullptr && *user != '\0') {
-    config.demo_user = user;
-  }
-  if (const char* password = std::getenv("BOURSE_DEMO_PASSWORD"); password != nullptr && *password != '\0') {
-    config.demo_password = password;
-  }
   return Status::success();
 }
 
@@ -146,13 +140,13 @@ Usage: bourse-server [options]
                              0 disables                       (default 300)
 
   --auth <yes|no>            require authentication            (default no)
-  --admin-user <name>        bootstrap administrator          (default admin)
+  --admin-user <name>        pre-create this administrator. Optional: with no
+                             accounts on file, whoever registers first through
+                             the dashboard becomes the administrator, so a
+                             deployment needs no seeded credentials.
   --admin-password <pw>      its password. Omit and one is generated and
                              logged once at startup. Prefer the environment
                              variable: argv is visible in `ps`.
-  --demo-user <name>         optional read-only account, seeded at startup
-  --demo-password <pw>       its password. Safe to publish: a viewer cannot
-                             write, FLUSHALL or manage users.
   --session-ttl <seconds>    session lifetime                 (default 43200)
   --auth-iterations <n>      PBKDF2 work factor               (default 210000)
   --help                     show this message
@@ -162,10 +156,8 @@ Environment (read first; any flag above overrides it):
                              this at run time, so the image needs no rebuild.
   BOURSE_HOST                bind address
   BOURSE_AUTH                yes|no
-  BOURSE_ADMIN_USER          bootstrap administrator name
+  BOURSE_ADMIN_USER          pre-created administrator name; optional
   BOURSE_ADMIN_PASSWORD      its password; setting this implies --auth yes
-  BOURSE_DEMO_USER           read-only account name
-  BOURSE_DEMO_PASSWORD       its password
 )";
 }
 
@@ -232,10 +224,6 @@ Result<Config> Config::fromArgs(int argc, char** argv) {
     } else if (arg == "--admin-password") {
       BOURSE_ASSIGN_OR_RETURN(config.admin_password, value_for("--admin-password"));
       config.auth_enabled = true;
-    } else if (arg == "--demo-user") {
-      BOURSE_ASSIGN_OR_RETURN(config.demo_user, value_for("--demo-user"));
-    } else if (arg == "--demo-password") {
-      BOURSE_ASSIGN_OR_RETURN(config.demo_password, value_for("--demo-password"));
     } else if (arg == "--session-ttl") {
       BOURSE_ASSIGN_OR_RETURN(const std::string text, value_for("--session-ttl"));
       std::size_t seconds = 0;
@@ -384,6 +372,9 @@ Status BourseServer::start() {
     }
   }
 
+  // Before the administrator check, so accounts already on file are loaded and
+  // a restart does not try to re-create anything.
+  BOURSE_TRY(openAccountStore());
   BOURSE_TRY(bootstrapAdministrator());
 
   BOURSE_TRY(resp_server_->start());
@@ -405,6 +396,23 @@ std::string BourseServer::snapshotPath() const {
 
 std::string BourseServer::walPath() const {
   return config_.data_dir + "/bourse.wal";
+}
+
+std::string BourseServer::accountStorePath() const {
+  return config_.data_dir + "/bourse.users";
+}
+
+Status BourseServer::openAccountStore() {
+  if (!config_.auth_enabled) {
+    return Status::success();
+  }
+
+  // Deliberately not conditional on --appendonly. Keyspace durability is a
+  // performance trade-off a deployment can reasonably decline; losing the
+  // accounts people signed up with is not, and an auth server that forgets
+  // every user on restart is broken rather than merely fast.
+  BOURSE_TRY(File::ensureDirectory(config_.data_dir));
+  return auth_.openStore(accountStorePath());
 }
 
 Result<std::size_t> BourseServer::recover() {
@@ -476,6 +484,14 @@ Status BourseServer::bootstrapAdministrator() {
   if (!config_.auth_enabled) {
     return Status::success();
   }
+
+  // No configured administrator is the normal case, not an error. Accounts are
+  // created by people registering, and the first registration on an empty
+  // store is made an administrator -- so a public deployment ships with no
+  // credentials at all, and there is nothing published to guess.
+  if (config_.admin_user.empty()) {
+    return Status::success();
+  }
   if (auth_.hasUser(config_.admin_user)) {
     return Status::success();
   }
@@ -510,24 +526,6 @@ Status BourseServer::bootstrapAdministrator() {
     BOURSE_LOG_INFO("administrator '", config_.admin_user, "' created from configuration");
   }
 
-  // Optional read-only account for a public demo.
-  //
-  // A deployment whose only account is the administrator forces a choice
-  // between publishing admin credentials and letting nobody in at all. Seeding
-  // a viewer from configuration is the third option: it survives restarts,
-  // unlike an account created at runtime, and a viewer cannot write, cannot
-  // FLUSHALL and cannot manage users -- so the credentials are safe to print
-  // in a README.
-  if (!config_.demo_user.empty() && !config_.demo_password.empty() && !auth_.hasUser(config_.demo_user)) {
-    const Status demo = auth_.addUser(config_.demo_user, config_.demo_password, auth::Role::kViewer);
-    if (!demo.ok()) {
-      // Not fatal: a misconfigured demo account must not stop the server from
-      // starting, and the administrator still works.
-      BOURSE_LOG_WARN("demo user '", config_.demo_user, "' not created: ", demo.message());
-    } else {
-      BOURSE_LOG_INFO("read-only demo user '", config_.demo_user, "' created from configuration");
-    }
-  }
   return Status::success();
 }
 
