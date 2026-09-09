@@ -749,7 +749,13 @@ $("logout").onclick = async () => {
   try { await api("/api/auth/logout", { method: "POST" }); } catch (_) { /* revoke anyway */ }
   token = "";
   writeStored(kTokenKey, "");
-  applyIdentity({ authenticated: false, auth_enabled: authRequired, username: "", role: "anonymous" });
+  // Someone who just signed out has an account, so the dialog reopens ready to
+  // sign in -- not on whichever tab they happened to leave it on. has_accounts
+  // is passed explicitly because applyIdentity reads it to choose that tab, and
+  // a missing field would read as "no accounts exist" and offer signup.
+  setGateMode("signin");
+  applyIdentity({ authenticated: false, auth_enabled: authRequired, username: "", role: "anonymous",
+                  has_accounts: true });
   toast("Signed out");
 };
 

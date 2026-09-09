@@ -189,6 +189,10 @@ def run(page, base, checks):
     page.click("#logout")
     page.wait_for_timeout(900)
     checks("signing out re-opens the gate", page.locator("#gate").is_visible())
+    # Somebody signing out has an account, so the dialog must come back ready
+    # to sign in rather than on whichever tab it was left on.
+    checks("the gate returns on the Sign in tab",
+           page.locator("#tabSignin").get_attribute("aria-selected") == "true")
 
     page.reload(wait_until="networkidle")
     page.wait_for_timeout(600)
