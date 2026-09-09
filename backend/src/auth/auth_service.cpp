@@ -825,7 +825,7 @@ Status AuthService::openStore(const std::string& path) {
       totp.emplace(name, std::move(state));
     } else {
       return Status::corruption("account store line " + std::to_string(number) +
-                                    " has an unknown record type '" + kind + "'");
+                                " has an unknown record type '" + kind + "'");
     }
   }
 

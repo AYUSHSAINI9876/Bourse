@@ -12,9 +12,13 @@
 #include <algorithm>
 #include <atomic>
 #include <ctime>
+#include <filesystem>
 #include <memory>
+#include <random>
 #include <string>
+#include <system_error>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "bourse/auth/auth_service.hpp"
@@ -317,18 +321,42 @@ TEST(RegistrationTest, ConcurrentSignupsProduceExactlyOneAdministrator) {
 // Durable accounts
 // ---------------------------------------------------------------------------
 
-/// A unique path per test, removed on destruction. Accounts are written to a
-/// real file here rather than a mock: the failure this guards against is a
-/// restart losing every account, and only the round trip through the
-/// filesystem actually demonstrates it does not.
+/// A private directory per instance, removed on destruction. Accounts are
+/// written to a real file here rather than a mock: the failure this guards
+/// against is a restart losing every account, and only the round trip through
+/// the filesystem actually demonstrates it does not.
 class AccountStorePath {
  public:
   AccountStorePath() {
-    static std::atomic<int> counter{0};
-    path_ = "./bourse-test-accounts-" + std::to_string(counter.fetch_add(1)) + ".users";
-    std::remove(path_.c_str());
+    // ctest runs each test in its own process, so a process-local counter read
+    // 0 in every one of them and every test landed on the same relative path.
+    // Under `ctest --parallel` two tests then shared a single store: one
+    // registered "alice" into the other's file, so the second registration
+    // failed on a taken name, and each constructor deleted the store the other
+    // was still using.
+    //
+    // Creating the directory is itself the uniqueness check -- create_directory
+    // reports false when the path already exists, so the winner of a race
+    // between two processes is unambiguous, and there is no separate
+    // "does it exist?" test that could be raced.
+    std::random_device entropy;
+    for (;;) {
+      std::filesystem::path candidate =
+          std::filesystem::temp_directory_path() /
+          ("bourse-test-accounts-" + std::to_string(entropy()) + "-" + std::to_string(entropy()));
+      std::error_code ec;
+      if (std::filesystem::create_directory(candidate, ec) && !ec) {
+        dir_ = std::move(candidate);
+        break;
+      }
+    }
+    path_ = (dir_ / "accounts.users").string();
   }
-  ~AccountStorePath() { std::remove(path_.c_str()); }
+
+  ~AccountStorePath() {
+    std::error_code ec;
+    std::filesystem::remove_all(dir_, ec);
+  }
 
   AccountStorePath(const AccountStorePath&) = delete;
   AccountStorePath& operator=(const AccountStorePath&) = delete;
@@ -336,6 +364,7 @@ class AccountStorePath {
   [[nodiscard]] const std::string& get() const { return path_; }
 
  private:
+  std::filesystem::path dir_;
   std::string path_;
 };
 
@@ -481,8 +510,7 @@ TEST(AccountStoreTest, TwoFactorEnrolmentSurvivesARestart) {
   fake_now += kTotpPeriodSeconds * 1000;
   const Result<std::string> fresh = totp(raw.value(), fake_now / 1000);
   ASSERT_TRUE(fresh.ok());
-  const Result<LoginResult> with_code =
-      reopened.login("alice", "alice-password-1", "test", fresh.value());
+  const Result<LoginResult> with_code = reopened.login("alice", "alice-password-1", "test", fresh.value());
   EXPECT_TRUE(with_code.ok()) << with_code.status().toString();
 }
 

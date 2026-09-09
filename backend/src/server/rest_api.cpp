@@ -69,8 +69,8 @@ bool isPublicPath(const std::string& path) {
   // make "auth is on and you are not signed in" indistinguishable from "this
   // build has no auth routes". It reveals only whether auth is enabled, which
   // any other endpoint already reveals by returning 401.
-  return path == "/" || path == "/health" || path == "/api/auth/login" ||
-         path == "/api/auth/register" || path == "/api/auth/me";
+  return path == "/" || path == "/health" || path == "/api/auth/login" || path == "/api/auth/register" ||
+         path == "/api/auth/me";
 }
 
 /// Runs a command through the same registry the RESP codec uses and renders the
