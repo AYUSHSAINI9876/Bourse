@@ -388,7 +388,7 @@ The comments in this codebase explain *why*, not *what*. A selection:
 
 **Prices are integer ticks.** `0.1 + 0.2 != 0.3` in binary floating point, so two orders that should cross at the same price compare unequal. There is a test for exactly that. → [`order.hpp`](backend/include/bourse/match/order.hpp)
 
-**Trades print at the resting order's price.** Price improvement accrues to the side that was patient enough to sit on the book — the incentive every venue wants, and a classic thing to get backwards. → [`order_book.cpp`](backend/src/match/order_book.cpp)
+**Trades print at the resting order's price.** The order already on the book gets exactly the price it displayed, and any price improvement goes to the incoming order, which trades at a better price than its own limit. Printing at the incoming order's limit instead is a classic thing to get backwards. → [`order_book.cpp`](backend/src/match/order_book.cpp)
 
 **Fill-or-kill checks liquidity before consuming any.** A partial fill it then had to unwind would already have emitted trades that market-data consumers saw. → [`order_book.cpp`](backend/src/match/order_book.cpp)
 

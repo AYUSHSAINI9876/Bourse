@@ -127,10 +127,10 @@ TEST(OrderBookTest, CrossingOrderTradesImmediately) {
   EXPECT_EQ(book.quantityAt(Side::kSell, px("100.00")), 6);
 }
 
-TEST(OrderBookTest, PriceImprovementGoesToTheRestingOrder) {
+TEST(OrderBookTest, PriceImprovementGoesToTheIncomingOrder) {
   // A buyer willing to pay 101 that meets a seller resting at 100 trades at
-  // 100 -- the patient side keeps the improvement. Getting this backwards is
-  // a classic exchange bug.
+  // 100 -- the resting seller gets its displayed price and the incoming buyer
+  // keeps the 1.00 of improvement. Printing at 101 is a classic exchange bug.
   OrderBook book("AAPL");
   book.submit(makeOrder(1, Side::kSell, px("100.00"), 10));
 

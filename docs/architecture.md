@@ -136,7 +136,7 @@ The cost is one virtual call per row per operator, which is exactly why producti
 
 **Prices are integer ticks, never doubles.** `0.1 + 0.2 != 0.3` in binary floating point, so two orders that should cross at the same price compare unequal. Every exchange that has shipped uses scaled integers.
 
-**Trades print at the resting order's price.** Price improvement accrues to the side that was patient enough to sit on the book. Getting this backwards is a classic exchange bug and is directly tested.
+**Trades print at the resting order's price.** The resting order gets exactly the price it displayed, and any price improvement goes to the incoming order. Printing at the incoming order's limit instead is a classic exchange bug and is directly tested.
 
 **Intrusive FIFO lists per price level.** The links live inside the `Order`, which comes from an `ObjectPool`. A `std::list<Order>` would allocate a node per order and add a pointer chase; here cancel is an O(1) unlink with no search, and steady-state order entry performs zero calls to `operator new` — asserted by watching the pool's chunk count.
 

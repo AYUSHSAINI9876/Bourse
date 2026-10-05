@@ -47,7 +47,7 @@ say "2. It is an exchange (price-time priority, real order types)"
 run $R ORDER AAPL SELL LIMIT 10 100.50
 run $R ORDER AAPL SELL LIMIT 10 101.00
 echo "  a buy at 101 crosses the 100.50 resting order and prints at 100.50 --"
-echo "  price improvement goes to the side that was patient:"
+echo "  the incoming buyer, not the resting seller, gets the price improvement:"
 run $R ORDER AAPL BUY LIMIT 4 101.00
 run $R BOOK AAPL
 run $R TRADES AAPL

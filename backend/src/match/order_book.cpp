@@ -303,9 +303,9 @@ Quantity OrderBook::match(Order& incoming, std::vector<Trade>& trades) {
 
         Trade trade;
         trade.sequence = ++trade_sequence_;
-        // The trade prints at the *resting* order's price. Any price
-        // improvement therefore accrues to the order that was patient enough
-        // to sit on the book, which is the incentive every venue wants.
+        // The trade prints at the *resting* order's price: the resting order
+        // gets exactly the price it displayed, and any price improvement goes
+        // to the incoming order, whose limit was at least as aggressive.
         trade.price = level_price;
         trade.quantity = fill;
         trade.resting_order_id = resting->id;
